@@ -33,7 +33,7 @@ the @rfc for more information about JSON.
     @item{the value of @racket[jsnull], @racket['null] by default}
     @item{@racket[boolean?]}
     @item{@racket[string?]}
-    @item{@racket[(or/c exact-integer? inexact-real?)]}
+    @item{@racket[(or/c exact-integer? (and/c inexact? rational?))]}
     @item{@racket[(listof jsexpr?)]}
     @item{@racket[(and/c hash-eq? (hash/c symbol? jsexpr?))]}]
 
@@ -46,6 +46,7 @@ the @rfc for more information about JSON.
   (jsexpr? #hasheq((turnip . 82)))
   (jsexpr? (vector 1 2 3 4))
   (jsexpr? #hasheq(("turnip" . 82)))
+  (jsexpr? +inf.0)
 ]
 }
 
