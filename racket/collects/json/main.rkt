@@ -6,6 +6,13 @@
 ;; edited: Matthias, organization in preparation for pretty-print
 
 ;; -----------------------------------------------------------------------------
+;; DEPENDENCIES
+
+;; racket/contract must come before provide
+(require syntax/readerr
+         racket/contract)
+
+;; -----------------------------------------------------------------------------
 ;; SERVICES
 
 (provide
@@ -14,27 +21,37 @@
  
  ;; Any -> Boolean 
  jsexpr?
-
- #;
- (->* (Output-Port) ([#:null Any][#:encode (U 'control 'all)]))
- ;; #:null (json-null)
- ;; #:encode 'control
- write-json
  
- #;
- (->* (Input-Port) ([#:null Any]))
- ;; #null: (json-null)
- read-json
- 
- jsexpr->string
- jsexpr->bytes
- string->jsexpr
- bytes->jsexpr)
-
-;; -----------------------------------------------------------------------------
-;; DEPENDENCIES
-
-(require syntax/readerr)
+ (contract-out
+  [write-json
+   (->* (jsexpr?)
+        (output-port? ;; (current-output-port)
+         #:null any/c ;; (json-null)
+         #:encode (or/c 'control 'all)) ;; 'control
+        any)]
+  [read-json
+   (->* (input-port?)
+        (#:null any/c) ;; (json-null)
+        any)] ;; jsexpr?
+  [jsexpr->string
+   (->* (jsexpr?)
+        (#:null any/c ;; (json-null)
+         #:encode (or/c 'control 'all)) ;; 'control
+        any)] ;; string?
+  [jsexpr->bytes
+   (->* (jsexpr?)
+        (#:null any/c ;; (json-null)
+         #:encode (or/c 'control 'all)) ;; 'control
+        any)] ;; bytes?
+  [string->jsexpr
+   (->* (string?)
+        (#:null any/c) ;; (json-null)
+        any)] ;; jsexpr?
+  [bytes->jsexpr
+   (->* (bytes?)
+        (#:null any/c) ;; (json-null)
+        any)] ;; jsexpr?
+  ))
 
 ;; -----------------------------------------------------------------------------
 ;; CUSTOMIZATION
