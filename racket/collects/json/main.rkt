@@ -69,24 +69,28 @@
 (define (write-json* who x o jsnull enc)
   (define (escape m)
     (define ch (string-ref m 0))
-    (define r
-      (assoc ch '([#\backspace . "\\b"] [#\newline . "\\n"] [#\return . "\\r"]
-                                        [#\page . "\\f"] [#\tab . "\\t"]
-                                        [#\\ . "\\\\"] [#\" . "\\\""])))
-    (define (u-esc n)
-      (define str (number->string n 16))
-      (define pad (case (string-length str)
-                    [(1) "000"] [(2) "00"] [(3) "0"] [else ""]))
-      (string-append "\\u" pad str))
-    (if r
-        (cdr r)
-        (let ([n (char->integer ch)])
-          (if (n . < . #x10000)
-              (u-esc n)
-              ;; use the (utf-16 surrogate pair) double \u-encoding
-              (let ([n (- n #x10000)])
-                (string-append (u-esc (+ #xD800 (arithmetic-shift n -10)))
-                               (u-esc (+ #xDC00 (bitwise-and n #x3FF)))))))))
+    (case ch
+      [(#\backspace) "\\b"]
+      [(#\newline) "\\n"]
+      [(#\return) "\\r"]
+      [(#\page) "\\f"]
+      [(#\tab) "\\t"]
+      [(#\\) "\\\\"]
+      [(#\") "\\\""]
+      [else 
+       (define (u-esc n)
+         (define str (number->string n 16))
+         (define pad (case (string-length str)
+                       [(1) "000"] [(2) "00"] [(3) "0"] [else ""]))
+         (string-append "\\u" pad str))
+       (define n
+         (char->integer ch))
+       (if (n . < . #x10000)
+           (u-esc n)
+           ;; use the (utf-16 surrogate pair) double \u-encoding
+           (let ([n (- n #x10000)])
+             (string-append (u-esc (+ #xD800 (arithmetic-shift n -10)))
+                            (u-esc (+ #xDC00 (bitwise-and n #x3FF))))))]))
   (define rx-to-encode
     (case enc
       ;; FIXME: This should also encode (always) anything that is represented
@@ -158,10 +162,17 @@
             [else (write-byte c result) (loop)])))
       (cond
         [(not esc) (bytes->string/utf-8 (get-output-bytes result))]
-        [(assoc esc '([#"b" . #"\b"] [#"n" . #"\n"] [#"r" . #"\r"]
-                                     [#"f" . #"\f"] [#"t" . #"\t"]
-                                     [#"\\" . #"\\"] [#"\"" . #"\""] [#"/" . #"/"]))
-         => (λ (m) (write-bytes (cdr m) result) (loop))]
+        [(case esc
+           [(#"b") #"\b"]
+           [(#"n") #"\n"]
+           [(#"r") #"\r"]
+           [(#"f") #"\f"]
+           [(#"t") #"\t"]
+           [(#"\\") #"\\"]
+           [(#"\"") #"\""]
+           [(#"/") #"/"]
+           [else #f])
+         => (λ (m) (write-bytes m result) (loop))]
         [(equal? esc #"u")
          (let* ([e (or (regexp-try-match #px#"^[a-fA-F0-9]{4}" i)
                        (err "bad string \\u escape"))]
