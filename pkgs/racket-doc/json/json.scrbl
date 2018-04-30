@@ -34,7 +34,7 @@ the @rfc for more information about JSON.
   which is recognized using @racket[eq?]}
     @item{@racket[boolean?]}
     @item{@racket[string?]}
-    @item{@racket[(or/c exact-integer? (and/c inexact? rational?))]}
+    @item{@racket[(or/c exact-integer? (and/c inexact-real? rational?))]}
     @item{@racket[(listof jsexpr?)]}
     @item{@racket[(hash/c symbol? jsexpr?)]}]
 

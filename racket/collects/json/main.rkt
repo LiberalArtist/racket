@@ -24,7 +24,7 @@
  
  (contract-out
   [write-json
-   (->* (jsexpr?)
+   (->* (any/c) ;; jsexpr? but dependent on #:null arg
         (output-port? ;; (current-output-port)
          #:null any/c ;; (json-null)
          #:encode (or/c 'control 'all)) ;; 'control
@@ -34,12 +34,12 @@
         (#:null any/c) ;; (json-null)
         any)] ;; jsexpr?
   [jsexpr->string
-   (->* (jsexpr?)
+   (->* (any/c) ;; jsexpr? but dependent on #:null arg
         (#:null any/c ;; (json-null)
          #:encode (or/c 'control 'all)) ;; 'control
         any)] ;; string?
   [jsexpr->bytes
-   (->* (jsexpr?)
+   (->* (any/c) ;; jsexpr? but dependent on #:null arg
         (#:null any/c ;; (json-null)
          #:encode (or/c 'control 'all)) ;; 'control
         any)] ;; bytes?
@@ -74,7 +74,7 @@
                          (and (symbol? k) (loop v)))))))
 
 (define (inexact-rational? x) ; not nan or inf
-  (and (inexact? x) (rational? x)))
+  (and (inexact-real? x) (rational? x)))
 
 ;; -----------------------------------------------------------------------------
 ;; GENERATION  (from Racket to JSON)
@@ -264,9 +264,9 @@
   (get-output-bytes o))
 
 (define (string->jsexpr str #:null [jsnull (json-null)])
-  (unless (string? str) (raise-type-error 'string->jsexpr "string" str))
+  ;; str is protected by contract
   (read-json* 'string->jsexpr (open-input-string str) jsnull))
 
-(define (bytes->jsexpr str #:null [jsnull (json-null)])
-  (unless (bytes? str) (raise-type-error 'bytes->jsexpr "bytes" str))
-  (read-json* 'bytes->jsexpr (open-input-bytes str) jsnull))
+(define (bytes->jsexpr bs #:null [jsnull (json-null)])
+  ;; bs is protected by contract
+  (read-json* 'bytes->jsexpr (open-input-bytes bs) jsnull))
