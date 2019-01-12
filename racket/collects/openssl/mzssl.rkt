@@ -1567,7 +1567,7 @@ TO DO:
 ;; ssl-port->cipher : symbol ssl-port -> _SSL_CIPHER*
 (define (ssl-port->cipher who p)
   (let-values ([(mzssl _input?) (lookup who p)])
-    (SSL_get_current_cipher p)))
+    (SSL_get_current_cipher (mzssl-ssl mzssl))))
 
 (define (ssl-peer-verified? p)
   (let-values ([(mzssl input?) (lookup 'ssl-peer-verified? p)])

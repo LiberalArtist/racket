@@ -1,6 +1,8 @@
 #lang racket
 
-(require openssl rackunit)
+(require openssl
+         #;"../../../../racket/collects/openssl/mzssl.rkt"
+         rackunit)
 
 ;; not sure this is ideal for pem, but copied from "test-protocols.rkt"
 (define pem (build-path (collection-path "openssl") "test.pem")) 
@@ -8,7 +10,8 @@
 (define MSG:S->C "Yes, this is Racket too. Hello, Racket.")
 
 (define (negotiate-ciphers #:server server-cipher-spec
-                           #:client client-cipher-spec)
+                           #:client client-cipher-spec
+                           #:use-server-pref? use-server-pref?)
   (define cust (make-custodian))
   (dynamic-wind
    void
@@ -19,11 +22,12 @@
        (define server-thread
          (thread
           (λ ()
-            (define server-ctx (ssl-make-server-context 'tls11))
-            (ssl-server-context-use-server-cipher-preference! server-ctx)
-            (ssl-set-ciphers! server-ctx server-cipher-spec)
+            (define server-ctx (ssl-make-server-context 'tls))
             (ssl-load-certificate-chain! server-ctx pem)
             (ssl-load-private-key! server-ctx pem)
+            (ssl-set-ciphers! server-ctx server-cipher-spec)
+            (when use-server-pref?
+              (ssl-server-context-use-server-cipher-preference! server-ctx))
             (define-values (r w)
               (ports->ssl-ports r2 w2
                                 #:context server-ctx
@@ -33,7 +37,7 @@
             (check-equal? (read-line r) MSG:C->S "message from client")
             (fprintf w "~a\n" MSG:S->C)
             (close-output-port w))))
-       (define client-ctx (ssl-make-client-context 'tls11))
+       (define client-ctx (ssl-make-client-context 'tls))
        (ssl-set-ciphers! client-ctx client-cipher-spec)
        (define-values (r w)
          (ports->ssl-ports r1 w1
@@ -63,7 +67,17 @@
 (define c2-c1 (string-append c2 ":" c1))
   
 (negotiate-ciphers #:server c1-c2
-                   #:client c2-c1)
+                   #:client c2-c1
+                   #:use-server-pref? #t)
 
+(negotiate-ciphers #:server c2-c1
+                   #:client c1-c2
+                   #:use-server-pref? #t)
 
+(negotiate-ciphers #:server c1-c2
+                   #:client c2-c1
+                   #:use-server-pref? #f)
 
+(negotiate-ciphers #:server c2-c1
+                   #:client c1-c2
+                   #:use-server-pref? #f)
