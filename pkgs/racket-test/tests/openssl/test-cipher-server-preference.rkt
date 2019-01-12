@@ -1,7 +1,7 @@
 #lang racket
 
-(require openssl
-         #;"../../../../racket/collects/openssl/mzssl.rkt"
+(require #;openssl
+         "../../../../racket/collects/openssl/mzssl.rkt"
          rackunit)
 
 ;; not sure this is ideal for pem, but copied from "test-protocols.rkt"
@@ -62,6 +62,32 @@
 (define c2
   ;; aka TLS_RSA_WITH_AES_256_CBC_SHA
   "AES256-SHA")
+(define c3
+  ;; aka TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
+  "ECDHE-RSA-AES128-SHA")
+(define c4
+  ;; aka TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
+  "ECDHE-RSA-AES256-SHA")
+
+(define c2-c4 (string-append c2 ":" c4))
+(define c4-c2 (string-append c4 ":" c2))
+
+(negotiate-ciphers #:server c2-c4
+                   #:client c4-c2
+                   #:use-server-pref? #t)
+
+(negotiate-ciphers #:server c4-c2
+                   #:client c2-c4
+                   #:use-server-pref? #t)
+
+(negotiate-ciphers #:server c2-c4
+                   #:client c4-c2
+                   #:use-server-pref? #f)
+
+(negotiate-ciphers #:server c4-c2
+                   #:client c2-c4
+                   #:use-server-pref? #f)
+
 
 (define c1-c2 (string-append c1 ":" c2))
 (define c2-c1 (string-append c2 ":" c1))
@@ -81,3 +107,4 @@
 (negotiate-ciphers #:server c2-c1
                    #:client c1-c2
                    #:use-server-pref? #f)
+
