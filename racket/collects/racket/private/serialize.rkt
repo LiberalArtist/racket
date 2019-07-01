@@ -207,6 +207,16 @@
     (+ (hash-count share)
        (hash-count cycle)))
 
+  (define (vector-for-each proc vec)
+    (for ([x (in-vector vec)])
+      (proc x)))
+
+  (define (vector-map proc vec)
+    ;; unlike the one in racket/vector,
+    ;; has a fixed arity & returns a list
+    (for/list ([x (in-vector vec)])
+      (proc x)))
+
   ;; Traverses v to find cycles and sharing. Shared
   ;;  objects go in the `shared' table, and cycle-breakers go in
   ;;  `cycle'. In each case, the object is mapped to a number that is
@@ -254,7 +264,7 @@
 	  (cond
 	   [(serializable-struct? v)
 	    (let ([info (serializable-info v)])
-	      (for-each loop (vector->list ((serialize-info-vectorizer info) v))))]
+	      (vector-for-each loop ((serialize-info-vectorizer info) v)))]
            [(and (struct? v)
                  (prefab-struct-key v))
             (for-each loop (struct->list v))]
@@ -266,7 +276,7 @@
 	    ;; No sub-structure
 	    (void)]
 	   [(vector? v)
-	    (for-each loop (vector->list v))]
+	    (vector-for-each loop v)]
            [(flvector? v) (void)] 
            [(fxvector? v) (void)] 
 	   [(pair? v)
@@ -342,9 +352,8 @@
        [(serializable-struct? v)
 	(let ([info (serializable-info v)])
 	  (cons (mod-to-id info mod-map mod-map-cache deser-path->relative-path) 
-		(map (serial #t)
-		     (vector->list
-		      ((serialize-info-vectorizer info) v)))))]
+		(vector-map (serial #t)
+                            ((serialize-info-vectorizer info) v))))]
        [(and (struct? v)
              (prefab-struct-key v))
         => (lambda (k)
@@ -361,7 +370,7 @@
               (cons 'p* v-rel)
               (list* 'p+ (path->bytes v) (path-convention-type v))))]
        [(vector? v)
-        (define elems (map (serial #t) (vector->list v)))
+        (define elems (vector-map (serial #t) v))
         (if (and (immutable? v)
                  (andmap quotable? elems))
             (cons 'q v)
@@ -620,7 +629,7 @@
          ;; Prefab
          (let ([s (apply make-prefab-struct 
                          (cadr v)
-                         (vector->list (make-vector (cddr v) #f)))])
+                         (make-list (cddr v) #f))])
            (vector-set! fixup n (lambda (v)
                                   (let-values ([(si skipped?) (struct-info s)])
                                     (let loop ([si si])
