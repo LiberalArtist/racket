@@ -1224,12 +1224,14 @@ int rktio_process_allowed_flags(rktio_t *rktio)
 /*========================================================================*/
 
 rktio_process_result_t *rktio_process(rktio_t *rktio,
-                                      const char *command, int argc, rktio_const_string_t *argv,
+                                      /* PATCHED for Guix (next line) */
+                                      const char *_guix_orig_command, int argc, rktio_const_string_t *argv,
                                       rktio_fd_t *stdout_fd, rktio_fd_t *stdin_fd, rktio_fd_t *stderr_fd,
                                       rktio_process_t *group_proc,
                                       const char *current_directory, rktio_envvars_t *envvars,
                                       int flags)
 {
+  const char *command; /* PATCHED for Guix */
   rktio_process_result_t *result;
   intptr_t to_subprocess[2], from_subprocess[2], err_subprocess[2];
   int pid;
@@ -1254,6 +1256,24 @@ rktio_process_result_t *rktio_process(rktio_t *rktio,
   int windows_chain_termination_to_child = (flags & RKTIO_PROCESS_WINDOWS_CHAIN_TERMINATION);
   int i;
 #endif
+
+/* BEGIN PATCH for Guix */
+#if defined(GUIX_RKTIO_PATCH_BIN_SH)
+# define GUIX_AS_a_STR_HELPER(x) #x
+# define GUIX_AS_a_STR(x) GUIX_AS_a_STR_HELPER(x)
+  /* A level of indirection makes `#` work as needed: */
+  command =
+      ((0 == strcmp(_guix_orig_command, "/bin/sh"))
+       && (! rktio_file_exists(rktio, "/bin/sh"))
+       && rktio_file_exists(rktio, GUIX_AS_a_STR(GUIX_RKTIO_PATCH_BIN_SH)))
+      ? GUIX_AS_a_STR(GUIX_RKTIO_PATCH_BIN_SH)
+      : _guix_orig_command;
+# undef GUIX_AS_a_STR
+# undef GUIX_AS_a_STR_HELPER
+#else
+  command = _guix_orig_command;
+#endif
+/* END PATCH for Guix */
 
   /* avoid compiler warnings: */
   to_subprocess[0] = -1;
