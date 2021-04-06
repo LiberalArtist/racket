@@ -1342,6 +1342,29 @@ The following @filepath{info.rkt} fields are used by the package manager:
        set up (plus collections for global documentation indexes and
        links).}
 
+ @item{@racketidfont{license} --- an @hyperlink[
+ "https://spdx.github.io/spdx-spec/appendix-IV-SPDX-license-expressions/"]{
+  SPDX License Expression}, represented as an s-expression with the quoted form:
+  @racketgrammar[#:literals (AND OR WITH) compound-expr
+                 license-id
+                 (license-id WITH exception-id)
+                 (compound-expr AND compound-expr)
+                 (compound-expr OR compound-expr)]
+  where a @racket[_license-id] is a short-form identifier from the
+  @hyperlink["https://spdx.org/licenses/index.html"]{SPDX License List}
+  (e.g. @racket[LGPL-3.0-or-later], @racket[Apache-2.0], or @racket[BSD-3-Clause]),
+  and an @racket[_exception-id] is an identifier from the
+  @hyperlink["https://spdx.org/licenses/exceptions-index.html"]{SPDX License Exceptions}
+  list (e.g. @racket[Classpath-exception-2.0]).
+  @margin-note{Note that the @litchar{+} operator, if used, must be written as part of
+   the @racket[_license-id], e.g. @racket[AFL-2.0+].
+  }
+
+  For example, packages in the main Racket distribution define @racketidfont{license} as:
+  @racketblock[(define license
+                 '(Apache-2.0 OR MIT))]
+ }
+
  @item{@definfofield{distribution-preference} --- either
        @racket['source], @racket['built], or @racket['binary],
        indicating the most suitable distribution mode for the package
@@ -1367,7 +1390,8 @@ The following @filepath{info.rkt} fields are used by the package manager:
 ]
 
 @history[#:changed "6.1.0.5" @elem{Added @racketidfont{update-implies}.}
-         #:changed "6.1.1.6" @elem{Added @racketidfont{distribution-preference}.}]
+         #:changed "6.1.1.6" @elem{Added @racketidfont{distribution-preference}.}
+         #:changed "8.1.0.2" @elem{Added @racketidfont{license}.}]
 
 @; ----------------------------------------
 
