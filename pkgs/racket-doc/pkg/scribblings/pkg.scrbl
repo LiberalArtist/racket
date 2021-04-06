@@ -1342,6 +1342,33 @@ The following @filepath{info.rkt} fields are used by the package manager:
        set up (plus collections for global documentation indexes and
        links).}
 
+ @item{@racketidfont{license} --- a value with the quoted form:
+  @racketgrammar*[#:literals (AND OR WITH SPDX-License-Identifier:)
+                  [license-datum
+                   (SPDX-License-Identifier: compound-expr)
+                   compound-expr]
+                  [compound-expr
+                   versioned-license-id
+                   (versioned-license-id WITH license-exception-id)
+                   (compound-expr AND compound-expr)
+                   (compound-expr OR compound-expr)]
+                  ]
+  where a @racket[_versioned-license-id] is a short-form identifier from the
+  @hyperlink["https://spdx.org/licenses/index.html"]{SPDX License List},
+  potentially with a version suffix (e.g. @racket[GPL-3.0-or-later], @racket[AFL-2.0+], or
+  @racket[LGPL-2.0-only]), and a @racket[_license-exception-id] is an identifier from the
+  @hyperlink["https://spdx.org/licenses/exceptions-index.html"]{SPDX License Exceptions}
+  list (e.g. @racket[Classpath-exception-2.0]).
+  
+  Writing the @racket[_license-datum] using @racket[quote], without internal newlines,
+  and in the form beginning with @racket[SPDX-License-Identifier:] my facilitate
+  processing by language-independent tools that detect license information.
+
+  For example, packages in the main Racket distribution define @racketidfont{license} as:
+  @racketblock[(define license
+                 '(SPDX-License-Identifier: (Apache-2.0 OR MIT)))]
+ }
+
  @item{@definfofield{distribution-preference} --- either
        @racket['source], @racket['built], or @racket['binary],
        indicating the most suitable distribution mode for the package
@@ -1367,7 +1394,8 @@ The following @filepath{info.rkt} fields are used by the package manager:
 ]
 
 @history[#:changed "6.1.0.5" @elem{Added @racketidfont{update-implies}.}
-         #:changed "6.1.1.6" @elem{Added @racketidfont{distribution-preference}.}]
+         #:changed "6.1.1.6" @elem{Added @racketidfont{distribution-preference}.}
+         #:changed "8.0.0.13" @elem{Added @racketidfont{license}.}]
 
 @; ----------------------------------------
 
