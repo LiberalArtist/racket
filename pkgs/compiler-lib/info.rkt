@@ -14,3 +14,6 @@
 (define pkg-authors '(mflatt))
 
 (define version "1.9")
+
+(define license
+  '(SPDX-License-Identifier: (Apache-2.0 OR MIT)))

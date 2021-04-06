@@ -10,3 +10,6 @@
                      "scheme-lib"
                      "rackunit-lib"
                      "serialize-cstruct-lib"))
+
+(define license
+  '(SPDX-License-Identifier: (Apache-2.0 OR MIT)))

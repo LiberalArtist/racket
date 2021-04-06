@@ -8,3 +8,6 @@
 (define pkg-desc "Racket compilation tools, such as `raco exe'")
 
 (define pkg-authors '(mflatt))
+
+(define license
+  '(SPDX-License-Identifier: (Apache-2.0 OR MIT)))
