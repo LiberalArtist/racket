@@ -11,4 +11,4 @@
 (define version "1.2")
 
 (define license
-  '(SPDX-License-Identifier: (Apache-2.0 OR MIT)))
+  '(Apache-2.0 OR MIT))

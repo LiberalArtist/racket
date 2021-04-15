@@ -18,4 +18,4 @@
 (define update-implies '("net-lib"))
 
 (define license
-  '(SPDX-License-Identifier: (Apache-2.0 OR MIT)))
+  '(Apache-2.0 OR MIT))
