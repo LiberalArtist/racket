@@ -1361,7 +1361,7 @@ The following @filepath{info.rkt} fields are used by the package manager:
   list (e.g. @racket[Classpath-exception-2.0]).
   
   Writing the @racket[_license-datum] using @racket[quote], without internal newlines,
-  and in the form beginning with @racket[SPDX-License-Identifier:] my facilitate
+  and in the form beginning with @racket[SPDX-License-Identifier:] may facilitate
   processing by language-independent tools that detect license information.
 
   For example, packages in the main Racket distribution define @racketidfont{license} as:
