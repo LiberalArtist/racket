@@ -136,44 +136,68 @@
 
 (define-syntax (make-temporary-file stx)
   (with-syntax ([app (datum->syntax stx #'#%app stx)])
+    (define (infer-template #:copy-from [copy-from #''#f]
+                            #:base-dir [base-dir #''#f])
+      (define line   (syntax-line stx))
+      (define col    (syntax-column stx))
+      (define source (syntax-source stx))
+      (define pos    (syntax-position stx))
+      (define str-src
+        (cond [(path? source)
+               (regexp-replace #rx"^<(.*?)>(?=/)"
+                               (path->relative-string/library source)
+                               (lambda (_ s) (string-upcase s)))]
+              [(string? source) source]
+              [else #f]))
+      (define str-loc
+        (cond [(and line col) (format "-~a-~a" line col)]
+              [pos (format "--~a" pos)]
+              [else ""]))
+      (define combined-str (string-append (or str-src "rkttmp") str-loc))
+      (define sanitized-str (regexp-replace* #rx"[<>:\"/\\|]" combined-str "-"))
+      (define max-len 50) ;; must be even
+      (define not-too-long-str
+        (cond [(< max-len (string-length sanitized-str))
+               (string-append (substring sanitized-str 0 (- (/ max-len 2) 2))
+                              "----"
+                              (substring sanitized-str
+                                         (- (string-length sanitized-str)
+                                            (- (/ max-len 2) 2))))]
+              [else sanitized-str]))
+      #`(app make-temporary-file/proc
+             '#,(string-append not-too-long-str "_~a")
+             #,copy-from
+             #,base-dir))
     (syntax-case stx ()
-      [x (identifier? #'x) #'make-temporary-file/proc]
+      [x
+       (identifier? #'x)
+       #'make-temporary-file/proc]
       [(_)
-       (let ()
-         (define line   (syntax-line stx))
-         (define col    (syntax-column stx))
-         (define source (syntax-source stx))
-         (define pos    (syntax-position stx))
-         (define str-src
-           (cond [(path? source)
-                  (regexp-replace #rx"^<(.*?)>(?=/)"
-                                  (path->relative-string/library source)
-                                  (lambda (_ s) (string-upcase s)))]
-                 [(string? source) source]
-                 [else #f]))
-         (define str-loc
-           (cond [(and line col) (format "-~a-~a" line col)]
-                 [pos (format "--~a" pos)]
-                 [else ""]))
-         (define combined-str (string-append (or str-src "rkttmp") str-loc))
-         (define sanitized-str (regexp-replace* #rx"[<>:\"/\\|]" combined-str "-"))
-         (define max-len 50) ;; must be even
-         (define not-too-long-str
-           (cond [(< max-len (string-length sanitized-str))
-                  (string-append (substring sanitized-str 0 (- (/ max-len 2) 2))
-                                 "----"
-                                 (substring sanitized-str
-                                            (- (string-length sanitized-str)
-                                               (- (/ max-len 2) 2))))]
-                 [else sanitized-str]))
-         #`(app make-temporary-file/proc
-                #,(string-append not-too-long-str "_~a")))]
+       (infer-template)]
+      [(_ #:copy-from copy-from)
+       (not (keyword? #'copy-from))
+       (infer-template #:copy-from #'copy-from)]
+      [(_ #:base-dir base-dir)
+       (not (keyword? #'base-dir))
+       (infer-template #:base-dir #'base-dir)]
+      [(_ #:base-dir base-dir #:copy-from copy-from)
+       (not (or (keyword? #'base-dir)
+                (keyword? #'copy-from)))
+       (infer-template #:copy-from #'copy-from #:base-dir #'base-dir)]
+      [(_ #:copy-from copy-from #:base-dir base-dir )
+       (not (or (keyword? #'base-dir)
+                (keyword? #'copy-from)))
+       (infer-template #:copy-from #'copy-from #:base-dir #'base-dir)]
       [(_ . whatever)
        #'(app make-temporary-file/proc . whatever)])))
 
 (define make-temporary-file/proc
   (let ()
-    (define (make-temporary-file [template "rkttmp~a"] [copy-from #f] [base-dir #f])
+    (define (make-temporary-file [template "rkttmp~a"]
+                                 #:copy-from [_copy-from #f]
+                                 #:base-dir [_base-dir #f]
+                                 [copy-from _copy-from]
+                                 [base-dir _base-dir])
       (with-handlers ([exn:fail:contract?
                        (lambda (x)
                          (raise-arguments-error 'make-temporary-file

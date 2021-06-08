@@ -349,14 +349,28 @@
 (err/rt-test (open-output-file (build-path (current-directory) "baddir" "x"))
 	    exn:fail:filesystem?)
 
+
+(arity-test make-temporary-file 0 3)
+(let-values ([(required accepted) (procedure-keywords make-temporary-file)])
+  (test '() 'make-temporary-file-no-required-keywords required)
+  (test '(#:base-dir #:copy-from) 'make-temporary-file-accepts-keywords accepted))
+
 (let ([tf (make-temporary-file)])
   (let-values ([(base name dir?) (split-path tf)])
-    (test #t 'make-temporary-file-uses-srcloc (and (regexp-match #rx"file.rktl" (path->bytes name)) #t)))
+    (test #t 'make-temporary-file-uses-srcloc (regexp-match? #rx"file.rktl" name)))
   (delete-file tf))
+(let ([tf (make-temporary-file #:copy-from 'directory)])
+  (let-values ([(base name dir?) (split-path tf)])
+    (test #t 'make-temporary-file-with-kw-uses-srcloc (regexp-match? #rx"file.rktl" name)))
+  (delete-directory tf))
 
-(let ([tf ((λ (t) (t)) make-temporary-file)])
-  (test #t 'make-temporary-file-in-ho-position (file-exists? tf))
-  (delete-file tf))
+(let ([make-temporary-file ((λ (x) x) make-temporary-file)])
+  (define dir (make-temporary-file "mtf-ho-dir~a" 'directory))
+  (test #t 'make-temporary-file-in-ho-position (directory-exists? dir))
+  (define tf (make-temporary-file #:base-dir dir))
+  (test #t 'make-temporary-file-in-ho-position-with-kw (file-exists? tf))
+  (delete-file tf)
+  (delete-directory dir))
 
 
 (define tempfilename (make-temporary-file))

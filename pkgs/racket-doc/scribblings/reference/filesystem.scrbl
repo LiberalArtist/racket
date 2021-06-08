@@ -1294,12 +1294,14 @@ will not create it.
 
 
 @defproc[(make-temporary-file [template string? "rkttmp~a"]
-                              [copy-from-filename (or/c path-string? #f 'directory) #f]
-                              [directory (or/c path-string? #f) #f])
+                              [#:copy-from copy-from/kw (or/c path-string? #f 'directory) #f]
+                              [#:base-dir base-dir/kw (or/c path-string? #f) #f]
+                              [copy-from (or/c path-string? #f 'directory) copy-from/kw]
+                              [base-dir (or/c path-string? #f) base-dir/kw])
          path?]{
 
-Creates a new temporary file and returns a pathname string for the
-file.  Instead of merely generating a fresh file name, the file is
+Creates a new temporary file and returns its path.
+Instead of merely generating a fresh file name, the file is
 actually created; this prevents other threads or processes from
 picking the same temporary name.
 
@@ -1307,21 +1309,28 @@ The @racket[template] argument must be a format string suitable
 for use with @racket[format] and one additional string argument (where
 the string contains only digits). If the resulting string is a
 relative path, it is combined with the result of
-@racket[(find-system-path 'temp-dir)], unless @racket[directory] is
+@racket[(find-system-path 'temp-dir)], unless @racket[base-dir] is
 provided and non-@racket[#f], in which case the
 file name generated from @racket[template] is combined with
 @racket[directory] to obtain a full path.
 
-The @racket[template] argument's default is only the string @racket["rkttmp~a"]
-when there is no source location information for the callsite of
-@racket[make-temporary-file] (or if @racket[make-temporary-file] is
-used in a higher-order position). If there is such information, then the template
-string is based on the source location.
+When the @racket[template] argument is not provided, if
+there is source location information for the callsite of
+@racket[make-temporary-file], a template string is generated
+based on the source location: the default is
+@racket["rkttmp~a"] only when no source location information
+is available (e.g@._ if @racket[make-temporary-file] is used
+in a higher-order position). Calling
+@racket[make-temporary-file] with
+@racket[#:copy-from] or @racket[#:base-dir],
+rather than the by-position equivalents, allows the
+generated template string to be used while also providing
+additional arguments.
 
-If @racket[copy-from-filename] is provided as path, the temporary file
+If @racket[copy-from] is provided as path, the temporary file
 is created as a copy of the named file (using @racket[copy-file]). If
-@racket[copy-from-filename] is @racket[#f], the temporary file is
-created as empty. If @racket[copy-from-filename] is
+@racket[copy-from] is @racket[#f], the temporary file is
+created as empty. If @racket[copy-from] is
 @racket['directory], then the temporary ``file'' is created as a
 directory.
 
@@ -1330,7 +1339,11 @@ writing when the pathname is returned. The client program calling
 @racket[make-temporary-file] is expected to open the file with the
 desired access and flags (probably using the @racket['truncate] flag;
 see @racket[open-output-file]) and to delete it when it is no longer
-needed.}
+needed.
+
+@history[
+ #:changed "8.1.0.6"
+ @elem{Added the @racket[#:copy-from] or @racket[#:base-dir] arguments.}]}
 
 @defproc[(call-with-atomic-output-file [file path-string?] 
                                        [proc ([port output-port?] [tmp-path path?]  . -> . any)]
