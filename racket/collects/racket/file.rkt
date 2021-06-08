@@ -10,6 +10,7 @@
          make-directory*
          make-parent-directory*
          make-temporary-file
+         make-temporary-directory
 
          get-preference
          put-preferences
@@ -134,38 +135,58 @@
     ;; Do nothing with an immediately relative path or a root directory
     (void)]))
 
+(define-for-syntax (infer-temporary-file-template stx)
+  (define line   (syntax-line stx))
+  (define col    (syntax-column stx))
+  (define source (syntax-source stx))
+  (define pos    (syntax-position stx))
+  (define str-src
+    (cond [(path? source)
+           (regexp-replace #rx"^<(.*?)>(?=/)"
+                           (path->relative-string/library source)
+                           (lambda (_ s) (string-upcase s)))]
+          [(string? source) source]
+          [else #f]))
+  (define str-loc
+    (cond [(and line col) (format "-~a-~a" line col)]
+          [pos (format "--~a" pos)]
+          [else ""]))
+  (define combined-str (string-append (or str-src "rkttmp") str-loc))
+  (define sanitized-str (regexp-replace* #rx"[<>:\"/\\|]" combined-str "-"))
+  (define max-len 50) ;; must be even
+  (define not-too-long-str
+    (cond [(< max-len (string-length sanitized-str))
+           (string-append (substring sanitized-str 0 (- (/ max-len 2) 2))
+                          "----"
+                          (substring sanitized-str
+                                     (- (string-length sanitized-str)
+                                        (- (/ max-len 2) 2))))]
+          [else sanitized-str]))
+  (string-append not-too-long-str "_~a"))
+
+(define-syntax (make-temporary-directory stx)
+  (with-syntax ([app (datum->syntax stx #'#%app stx)])
+    (syntax-case stx ()
+      [x
+       (identifier? #'x)
+       #'make-temporary-directory/proc]
+      [(_)
+       #`(app make-temporary-directory/proc
+              '#,(infer-temporary-file-template stx))]
+      [(_ #:base-dir base-dir)
+       (not (keyword? #'base-dir))
+       #`(app make-temporary-directory/proc
+              '#,(infer-temporary-file-template stx)
+              #:base-dir #'base-dir)]
+      [(_ . whatever)
+       #'(app make-temporary-directory/proc . whatever)])))
+
 (define-syntax (make-temporary-file stx)
   (with-syntax ([app (datum->syntax stx #'#%app stx)])
     (define (infer-template #:copy-from [copy-from #''#f]
                             #:base-dir [base-dir #''#f])
-      (define line   (syntax-line stx))
-      (define col    (syntax-column stx))
-      (define source (syntax-source stx))
-      (define pos    (syntax-position stx))
-      (define str-src
-        (cond [(path? source)
-               (regexp-replace #rx"^<(.*?)>(?=/)"
-                               (path->relative-string/library source)
-                               (lambda (_ s) (string-upcase s)))]
-              [(string? source) source]
-              [else #f]))
-      (define str-loc
-        (cond [(and line col) (format "-~a-~a" line col)]
-              [pos (format "--~a" pos)]
-              [else ""]))
-      (define combined-str (string-append (or str-src "rkttmp") str-loc))
-      (define sanitized-str (regexp-replace* #rx"[<>:\"/\\|]" combined-str "-"))
-      (define max-len 50) ;; must be even
-      (define not-too-long-str
-        (cond [(< max-len (string-length sanitized-str))
-               (string-append (substring sanitized-str 0 (- (/ max-len 2) 2))
-                              "----"
-                              (substring sanitized-str
-                                         (- (string-length sanitized-str)
-                                            (- (/ max-len 2) 2))))]
-              [else sanitized-str]))
       #`(app make-temporary-file/proc
-             '#,(string-append not-too-long-str "_~a")
+             '#,(infer-temporary-file-template stx)
              #,copy-from
              #,base-dir))
     (syntax-case stx ()
@@ -191,27 +212,35 @@
       [(_ . whatever)
        #'(app make-temporary-file/proc . whatever)])))
 
-(define make-temporary-file/proc
+(define-values [make-temporary-file/proc
+                make-temporary-directory/proc]
   (let ()
     (define (make-temporary-file [template "rkttmp~a"]
                                  #:copy-from [_copy-from #f]
                                  #:base-dir [_base-dir #f]
                                  [copy-from _copy-from]
                                  [base-dir _base-dir])
+      (do-make-temporary-file 'make-temporary-file
+                              template copy-from base-dir))
+    (define (make-temporary-directory [template "rkttmp~a"]
+                                      #:base-dir [base-dir #f])
+      (do-make-temporary-file 'make-temporary-directory
+                              template 'directory base-dir))
+    (define (do-make-temporary-file who template copy-from base-dir)
       (with-handlers ([exn:fail:contract?
                        (lambda (x)
-                         (raise-arguments-error 'make-temporary-file
+                         (raise-arguments-error who
                                                 "format string does not expect 1 argument"
                                                 "format string" template))])
         (format template void))
       (unless (or (not copy-from)
                   (path-string? copy-from)
                   (eq? copy-from 'directory))
-        (raise-argument-error 'make-temporary-file
+        (raise-argument-error who
                               "(or/c path-string? 'directory #f)"
                               copy-from))
       (unless (or (not base-dir) (path-string? base-dir))
-        (raise-argument-error 'make-temporary-file
+        (raise-argument-error who
                               "(or/c path-string? #f)"
                               base-dir))
       (let ([tmpdir (find-system-path 'temp-dir)])
@@ -251,7 +280,8 @@
                       (copy-file copy-from name))
                   (close-output-port (open-output-file name)))
               name)))))
-    make-temporary-file))
+    (values make-temporary-file
+            make-temporary-directory)))
 
 ;;  Open a temporary path for writing, automatically renames after,
 ;;  and arranges to delete path if there's an exception. Uses the an
@@ -281,7 +311,7 @@
       (delete-file path)))
   (let ([bp (current-break-parameterization)]
         [tmp-path (parameterize ([current-security-guard (or guard (current-security-guard))])
-                    (make-temporary-file "tmp~a" #f (or (path-only path) (current-directory))))]
+                    (make-temporary-file #:base-dir (or (path-only path) (current-directory))))]
         [ok? #f])
     (dynamic-wind
      void
@@ -315,7 +345,7 @@
                           (rename-file-or-directory tmp-path path #t)
                           void))]
                      [else
-                      (let ([tmp-path2 (make-temporary-file "tmp~a" #f (path-only path))])
+                      (let ([tmp-path2 (make-temporary-file #:base-dir (path-only path))])
                         (with-handlers ([exn:fail:filesystem? void])
                           (rename-file-or-directory path tmp-path2 #t))
                         (rename-file-or-directory tmp-path path #t)

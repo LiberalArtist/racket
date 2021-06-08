@@ -1330,9 +1330,10 @@ additional arguments.
 If @racket[copy-from] is provided as path, the temporary file
 is created as a copy of the named file (using @racket[copy-file]). If
 @racket[copy-from] is @racket[#f], the temporary file is
-created as empty. If @racket[copy-from] is
+created as empty. As a special case, if @racket[copy-from] is
 @racket['directory], then the temporary ``file'' is created as a
-directory.
+directory: prefer @racket[make-temporary-directory] for creating
+temporary directories.
 
 When a temporary file is created, it is not opened for reading or
 writing when the pathname is returned. The client program calling
@@ -1344,6 +1345,24 @@ needed.
 @history[
  #:changed "8.1.0.6"
  @elem{Added the @racket[#:copy-from] or @racket[#:base-dir] arguments.}]}
+
+@defproc[(make-temporary-directory [template string? "rkttmp~a"]
+                                   [#:base-dir base-dir (or/c path-string? #f) #f])
+         path?]{
+
+ Like @racket[make-temporary-file], but
+ creates a directory, rather than a regular file.
+
+ As with @racket[make-temporary-file], if the
+ @racket[template] argument is not provided, a template
+ string is generated from the source location of the call to
+ @racket[make-temporary-directory] when possible: the default
+ is @racket["rkttmp~a"] only when no source location
+ information is available.
+
+@history[
+ #:added "8.1.0.6"
+ ]}
 
 @defproc[(call-with-atomic-output-file [file path-string?] 
                                        [proc ([port output-port?] [tmp-path path?]  . -> . any)]
