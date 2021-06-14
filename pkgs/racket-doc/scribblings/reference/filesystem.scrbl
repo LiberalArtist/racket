@@ -1320,20 +1320,13 @@ and @racket[base-dir] will be used instead of
 
 On Windows, @racket[template] may produce an absolute path
 which is not a complete path (see @secref["windowspaths"])
-when @racket[base-dir] is absent of @racket[#f], in which
-case it will be resolved to a complete path relative to
-@racket[(current-directory)], or if @racket[base-dir] is a
-drive specification, in which case it will be used as with
-@racket[build-path]. If @racket[base-dir] is any other kind
+when @racket[base-dir] is absent or @racket[#f] (in which
+case it will be resolved relative to
+@racket[(current-directory)]) or if @racket[base-dir] is a
+drive specification (in which case it will be used as with
+@racket[build-path]). If @racket[base-dir] is any other kind
 of path, it is an error for @racket[template] to produce an
 absolute path.
-
-If the resulting string is a
-relative path, it is combined with the result of
-@racket[(find-system-path 'temp-dir)], unless @racket[base-dir] is
-provided and non-@racket[#f], in which case the
-file name generated from @racket[template] is combined with
-@racket[directory] to obtain a full path.
 
 When the @racket[template] argument is not provided, if
 there is source location information for the callsite of
