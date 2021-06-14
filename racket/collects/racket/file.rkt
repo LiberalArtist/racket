@@ -227,12 +227,6 @@
       (do-make-temporary-file 'make-temporary-directory
                               template 'directory base-dir))
     (define (do-make-temporary-file who template copy-from base-dir)
-      (with-handlers ([exn:fail:contract?
-                       (lambda (x)
-                         (raise-arguments-error who
-                                                "format string does not expect 1 argument"
-                                                "format string" template))])
-        (format template void))
       (unless (or (not copy-from)
                   (path-string? copy-from)
                   (eq? copy-from 'directory))
@@ -243,14 +237,58 @@
         (raise-argument-error who
                               "(or/c path-string? #f)"
                               base-dir))
+      (unless (string? template)
+        (raise-argument-error who "string?" template))
+      (let* ([result
+              (with-handlers ([exn:fail:contract?
+                               (lambda (x)
+                                 (raise-arguments-error
+                                  who
+                                  "malformed template"
+                                  "expected" (unquoted-printing-string
+                                              "a format string accepting 1 string argument")
+                                  "given" template))])
+                ;; docs promise argument will be a string containing only digits
+                (format template "0"))])
+        (unless (path-string? result)
+          (raise-arguments-error
+           who
+           "given template produced an invalid path"
+           "promised" (unquoted-printing-string "path-string?")
+           "produced" result
+           "template" template))
+        (define (bad-result-msg details)
+          ;; i.e. the result is valid as path, but not for our purposes
+          (string-append "given template produced an invalid result;\n " details))
+        (when (and base-dir (complete-path? result))
+          ;; On Windows, base-dir could be a drive specification,
+          ;; in which case it is ok for result to be an absolute path without a drive.
+          (raise-arguments-error
+           who
+           (bad-result-msg "complete path can not be combined with base-dir")
+           "template" template
+           "produced" result
+           "base-dir" base-dir))
+        (unless (eq? 'directory copy-from)
+          (when (let-values ([{_base _name must-be-dir?}
+                              (split-path result)])
+                  must-be-dir?)
+            (raise-arguments-error
+             who
+             (bad-result-msg
+              "syntactic directory path not allowed unless copy-from is 'directory")
+             "template" template
+             "produced" result
+             "copy-from" copy-from))))
       (let ([tmpdir (find-system-path 'temp-dir)])
         (let loop ([s (current-seconds)]
                    [ms (inexact->exact (truncate (current-inexact-milliseconds)))]
                    [tries 0])
-          (let ([name (let ([n (format template (format "~a~a" s ms))])
+          (let ([pth (path->complete-path
+                      (let ([n (format template (format "~a~a" s ms))])
                         (cond [base-dir (build-path base-dir n)]
                               [(relative-path? n) (build-path tmpdir n)]
-                              [else n]))])
+                              [else n])))])
             (with-handlers ([(lambda (exn)
                                (or (exn:fail:filesystem:exists? exn)
                                    (and (exn:fail:filesystem:errno? exn)
@@ -276,10 +314,10 @@
                                      (add1 tries)))])
               (if copy-from
                   (if (eq? copy-from 'directory)
-                      (make-directory name)
-                      (copy-file copy-from name))
-                  (close-output-port (open-output-file name)))
-              name)))))
+                      (make-directory pth)
+                      (copy-file copy-from pth))
+                  (close-output-port (open-output-file pth)))
+              pth)))))
     (values make-temporary-file
             make-temporary-directory)))
 
