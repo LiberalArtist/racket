@@ -177,7 +177,7 @@
        (not (keyword? #'base-dir))
        #`(app make-temporary-directory/proc
               '#,(infer-temporary-file-template stx)
-              #:base-dir #'base-dir)]
+              #:base-dir base-dir)]
       [(_ . whatever)
        #'(app make-temporary-directory/proc . whatever)])))
 
