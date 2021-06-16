@@ -433,6 +433,39 @@
   (test #t 'make-temporary-dir-syntactic-dir-template (directory-exists? td))
   (delete-directory td)
   (err/rt-test (make-temporary-file dir-template) exn:fail:contract? rx:tmp-file))
+;; tests for Windows paths that are absolute but not complete
+(when (eq? 'windows (system-path-convention-type))
+  (define complete-temp-dir
+    (path->complete-path
+     (find-system-path 'temp-dir)))
+  (define elems
+    (explode-path complete-temp-dir))
+  (define drive
+    (car elems))
+  (test #t 'make-temporary-file-w32-drive-spec (complete-path? drive))
+  (define temp-dir-no-drive
+    (apply build-path (cdr elems)))
+  (define abs-not-complete
+    (let ([str (path->string (build-path temp-dir-no-drive "rkttmp~a"))])
+      (if (eqv? #\\ (string-ref str 0))
+          str
+          (string-append "\\" str))))
+  (test #t 'make-temporary-file-w32-abs-template (absolute-path? abs-not-complete))
+  (test #f 'make-temporary-file-w32-abs-not-complete (complete-path? abs-not-complete))
+  (let ([tf (make-temporary-file abs-not-complete)])
+    (test #t 'make-temporary-file-w32-abs-no-base-dir (file-exists? tf))
+    (delete-file tf))
+  (let ([tf (make-temporary-file abs-not-complete #f drive)])
+    (test #t 'make-temporary-file-w32-abs-base-drive (file-exists? tf))
+    (delete-file tf))
+  ;; no absolute template w/ relative base-dir
+  (err/rt-test (make-temporary-file abs-not-complete #f "relative") exn:fail:contract?)
+  ;; no absolute template w/ driveless absolute base-dir
+  (err/rt-test (make-temporary-file abs-not-complete #f temp-dir-no-drive)
+               exn:fail:contract?)
+  ;; no absolute template w/ complete base-dir that is not just drive spec
+  (err/rt-test (make-temporary-file abs-not-complete #f (build-path drive (cadr elems)))
+               exn:fail:contract?))
 
 
 (define tempfilename (make-temporary-file))
