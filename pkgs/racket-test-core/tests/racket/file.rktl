@@ -410,7 +410,14 @@
 (err/rt-test (make-temporary-directory "bad\0~a") exn:fail:contract? rx:tmp-dir)
 (err/rt-test (make-temporary-file "bad~x") exn:fail:contract? rx:tmp-file)
 (err/rt-test (make-temporary-directory "bad~x") exn:fail:contract? rx:tmp-dir)
+;; The format string given to make-temporary-{file,directory}
+;; may produce an absolute path, and the behavior when it does so
+;; should be tested.
+;; However, representing paths as strings is inherently unreliable.
+;; Our approach is to:
+;;   - 
 (define (quote-absolute-template str)
+  ;; 
   ;; This is a hack to work around the fact that the `(find-system-path 'temp-dir)`
   ;; might be something like "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp".
   ;; It escapes @litchar{~} in the template unless it is part of the sequence
