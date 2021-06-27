@@ -410,9 +410,16 @@
 (err/rt-test (make-temporary-directory "bad\0~a") exn:fail:contract? rx:tmp-dir)
 (err/rt-test (make-temporary-file "bad~x") exn:fail:contract? rx:tmp-file)
 (err/rt-test (make-temporary-directory "bad~x") exn:fail:contract? rx:tmp-dir)
+(define (quote-absolute-template str)
+  ;; This is a hack to work around the fact that the `(find-system-path 'temp-dir)`
+  ;; might be something like "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp".
+  ;; It escapes @litchar{~} in the template unless it is part of the sequence
+  ;; "~arktqtd", which hopefully will be good enough for these tests.
+  (regexp-replace #rx"~(?!arktqtd)" str "~~"))
 (let* ([temp-dir (find-system-path 'temp-dir)]
        [absolute-template
-        (path->string (build-path temp-dir "absolute~a"))])
+        (quote-absolute-template
+         (path->string (build-path temp-dir "absolute~arktqtd")))])
   (define tf (make-temporary-file absolute-template))
   (test #t 'make-temporary-file-absolute (file-exists? tf))
   (delete-file tf)
@@ -446,10 +453,11 @@
   (define temp-dir-no-drive
     (apply build-path (cdr elems)))
   (define abs-not-complete
-    (let ([str (path->string (build-path temp-dir-no-drive "rkttmp~a"))])
+    (quote-absolute-template
+    (let ([str (path->string (build-path temp-dir-no-drive "tmp~arktqtd"))])
       (if (eqv? #\\ (string-ref str 0))
           str
-          (string-append "\\" str))))
+          (string-append "\\" str)))))
   (test #t 'make-temporary-file-w32-abs-template (absolute-path? abs-not-complete))
   (test #f 'make-temporary-file-w32-abs-not-complete (complete-path? abs-not-complete))
   (let ([tf (make-temporary-file abs-not-complete)])
