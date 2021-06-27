@@ -3,14 +3,18 @@
          setup/dirs
          setup/cross-system
          (for-syntax racket/base
+                     syntax/keyword
                      setup/path-to-relative))
 
 (provide delete-directory/files
          copy-directory/files
          make-directory*
          make-parent-directory*
+
          make-temporary-file
          make-temporary-directory
+         make-temporary-file*
+         make-temporary-directory*
 
          get-preference
          put-preferences
@@ -135,7 +139,231 @@
     ;; Do nothing with an immediately relative path or a root directory
     (void)]))
 
-(define-for-syntax (infer-temporary-file-template stx)
+;;---------------------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------------------
+;;
+;; MAKING TEMPORARY FILES & DIRECTORIES
+;; ------------------------------------
+;;
+;; There are four related functions defined in this section:
+;;
+;;   1. make-temporary-file        \
+;;                                  > based on `format`
+;;   2. make-temporary-directory   /
+;;
+;;   3. make-temporary-file*       \
+;;                                  > based on `bytes-append`
+;;   4. make-temporary-directory*  /
+;;
+;; All of these are actually macros, to support template generation from context.
+;; The procedures are named with `/proc` suffixes. For the `*` variants, there
+;; are also procedures named with `/context` suffixes, which are used when context
+;; can be inferred.
+;;
+;; The core logic is in `internal-make-temporary-file/directory`, which essentially
+;; implements the old `make-temporary-file` protocol (before it supported keyword
+;; arguments and had a separate `-directory` variant), except that it accepts a
+;; function to build candidate file names.
+;;
+;; Then there is a lot of argument checking.
+;; The entry point for the variants based on `format` (no `*`) is
+;; `do-make-temporary-file/directory:format`; for the `*` variants,
+;; `do-make-temporary-file/directory:bytes-append`.
+;; Each entry point tail-calls `do-make-temporary-file/directory:check-make-name`,
+;; which tries building a path from the template or prefix+suffix and reports
+;; various possible errors with the result.
+;; If the tests pass, it tail-calls `internal-make-temporary-file/directory`.
+
+(define (internal-make-temporary-file/directory who copy-from base-dir make-name)
+  (define tmpdir (find-system-path 'temp-dir))
+  (let loop ([s (current-seconds)]
+             [ms (inexact->exact (truncate (current-inexact-milliseconds)))]
+             [tries 0])
+    (define pth
+      (path->complete-path
+       (let ([n (make-name
+                 ;; docs promise argument will be a string containing only digits
+                 (format "~a~a" s ms))])
+         (cond [base-dir (build-path base-dir n)]
+               [(relative-path? n) (build-path tmpdir n)]
+               [else n]))))
+    (with-handlers ([(lambda (exn)
+                       (or (exn:fail:filesystem:exists? exn)
+                           (and (exn:fail:filesystem:errno? exn)
+                                (let ([errno (exn:fail:filesystem:errno-errno exn)])
+                                  (and (eq? 'windows (cdr errno))
+                                       (eqv? (car errno) 5) ; ERROR_ACCESS_DENIED
+                                       ;; On Windows, if the target path refers to a file
+                                       ;; that has been deleted but is still open
+                                       ;; somewhere, then an access-denied error is reported
+                                       ;; instead of a file-exists error; there appears
+                                       ;; to be no way to detect that it was really a
+                                       ;; file-still-exists error. Try again for a while.
+                                       ;; There's still a small chance that this will
+                                       ;; fail, but it's vanishingly small at 32 tries.
+                                       ;; If ERROR_ACCESS_DENIED really is the right
+                                       ;; error (e.g., because the target directory is not
+                                       ;; writable), we'll take longer to get there.
+                                       (tries . < . 32))))))
+                     (lambda (x)
+                       ;; try again with a new name
+                       (loop (- s (random 10))
+                             (+ ms (random 10))
+                             (add1 tries)))])
+      (if copy-from
+          (if (eq? copy-from 'directory)
+              (make-directory pth)
+              (copy-file copy-from pth))
+          (close-output-port (open-output-file pth)))
+      pth)))
+
+(define (check-base-dir who base-dir)
+  (unless (or (not base-dir) (path-string? base-dir))
+    (raise-argument-error who
+                          "(or/c path-string? #f)"
+                          base-dir)))
+(define (check-bytes who x)
+  (unless (bytes? x)
+    (raise-argument-error who "bytes?" x)))
+
+(define (do-make-temporary-file/directory:check-make-name
+         who copy-from base-dir make-name
+         #:wrapped-make-name wraped-make-name
+         #:complete-with-base-error complete-with-base-error
+         #:syntactic-directory-error syntactic-directory-error)
+  (define result
+    ;; docs promise argument will be a string containing only digits
+    (wraped-make-name "0"))
+  (when (and base-dir (complete-path? result))
+    ;; On Windows, base-dir could be a drive specification,
+    ;; in which case it is ok for result to be an absolute path without a drive.
+    (complete-with-base-error result))
+  (unless (eq? 'directory copy-from)
+    (when (let-values ([{_base _name must-be-dir?}
+                        (split-path result)])
+            must-be-dir?)
+      (syntactic-directory-error result)))
+  (internal-make-temporary-file/directory who copy-from base-dir make-name))
+
+(define (do-make-temporary-file/directory:format who template copy-from base-dir)
+  (unless (or (not copy-from)
+              (path-string? copy-from)
+              (eq? copy-from 'directory))
+    (raise-argument-error who
+                          "(or/c path-string? 'directory #f)"
+                          copy-from))
+  (check-base-dir who base-dir)
+  (unless (string? template)
+    (raise-argument-error who "string?" template))
+  (define (make-name digits-str)
+    (format template digits-str))
+  (define (bad-result-msg details)
+    ;; i.e. the result is valid as path, but not for our purposes
+    (string-append "given template produced an invalid result;\n " details))
+  (do-make-temporary-file/directory:check-make-name
+   who copy-from base-dir make-name
+   #:wrapped-make-name
+   (λ (digits-str)
+     (define result
+       (with-handlers ([exn:fail:contract?
+                        (lambda (x)
+                          (raise-arguments-error
+                           who
+                           "malformed template"
+                           "expected" (unquoted-printing-string
+                                       "a format string accepting 1 string argument")
+                           "given" template))])
+         (make-name digits-str)))
+     (unless (path-string? result)
+       (raise-arguments-error
+        who
+        "given template produced an invalid path"
+        "promised" (unquoted-printing-string "path-string?")
+        "produced" result
+        "template" template))
+     result)
+   #:complete-with-base-error
+   (λ (result)
+     ;; On Windows, base-dir could be a drive specification,
+     ;; in which case it is ok for result to be an absolute path without a drive.
+     (raise-arguments-error
+      who
+      (bad-result-msg "complete path can not be combined with base-dir")
+      "template" template
+      "produced" result
+      "base-dir" base-dir))
+   #:syntactic-directory-error
+   (λ (result)
+     (raise-arguments-error
+      who
+      (bad-result-msg
+       "syntactic directory path not allowed unless copy-from is 'directory")
+      "template" template
+      "produced" result
+      "copy-from" copy-from))))
+
+(define (do-make-temporary-file/directory:bytes-append
+         ctxt prefix suffix copy-from base-dir
+         #:directory? directory?)
+  (define who
+    (if directory?
+        'make-temporary-directory*
+        'make-temporary-file*))
+  (check-bytes who prefix)
+  (check-bytes who suffix)
+  (check-base-dir who base-dir)
+  (unless (or directory?
+              (not copy-from)
+              (path-string? copy-from))
+    (raise-argument-error who
+                          "(or/c path-string? #f)"
+                          copy-from))
+  (define (make-name/bytes digits-str)
+    (bytes-append prefix
+                  ctxt
+                  (path-element->bytes (string->path-element digits-str))
+                  suffix))
+  (define (bad-result-msg details)
+    ;; i.e. the result is valid as path, but not for our purposes
+    (string-append "given prefix and suffix produced an invalid result;\n " details))
+  (do-make-temporary-file/directory:check-make-name
+   who copy-from base-dir
+   (λ (digits-str)
+     (bytes->path (make-name/bytes digits-str)))
+   #:wraped-make-name
+   (λ (digits-str)
+     (define bs (make-name/bytes digits-str))
+     (with-handlers ([exn:fail?
+                      (λ (e)
+                        (raise-arguments-error
+                         who
+                         "given prefix and suffix produced an invalid path"
+                         "prefix" prefix
+                         "suffix" suffix
+                         "produced" bs))])
+       (bytes->path bs)))
+   #:syntactic-directory-error
+   (λ (result)
+     (raise-arguments-error
+      who
+      (bad-result-msg "syntactic directory path not allowed")
+      "prefix" prefix
+      "suffix" suffix
+      "produced" result))
+   #:complete-with-base-error
+   (λ (result)
+     ;; On Windows, base-dir could be a drive specification,
+     ;; in which case it is ok for result to be an absolute path without a drive.
+     (raise-arguments-error
+      who
+      (bad-result-msg "complete path can not be combined with base-dir")
+      "prefix" prefix
+      "suffix" suffix
+      "produced" result
+      "base-dir" base-dir))))
+
+
+(define-for-syntax (syntax->tmp-context-string stx)
   (define line   (syntax-line stx))
   (define col    (syntax-column stx))
   (define source (syntax-source stx))
@@ -162,7 +390,15 @@
                                      (- (string-length sanitized-str)
                                         (- (/ max-len 2) 2))))]
           [else sanitized-str]))
-  (string-append not-too-long-str "_~a"))
+  not-too-long-str)
+
+(define-for-syntax (infer-temporary-file-template stx)
+  (string-append (syntax->tmp-context-string stx) "_~a"))
+
+(define-for-syntax (infer-temporary-file-context-bytes stx)
+  ;; We rely on the sanitization above having been used
+  ;; successfully by Racket from time immemorial.
+  (string->bytes/utf-8 (syntax->tmp-context-string stx)))
 
 (define-syntax (make-temporary-directory stx)
   (with-syntax ([app (datum->syntax stx #'#%app stx)])
@@ -220,106 +456,93 @@
                                  #:base-dir [_base-dir #f]
                                  [copy-from _copy-from]
                                  [base-dir _base-dir])
-      (do-make-temporary-file 'make-temporary-file
-                              template copy-from base-dir))
+      (do-make-temporary-file/directory:format 'make-temporary-file
+                                               template copy-from base-dir))
     (define (make-temporary-directory [template "rkttmp~a"]
                                       #:base-dir [base-dir #f])
-      (do-make-temporary-file 'make-temporary-directory
-                              template 'directory base-dir))
-    (define (do-make-temporary-file who template copy-from base-dir)
-      (unless (or (not copy-from)
-                  (path-string? copy-from)
-                  (eq? copy-from 'directory))
-        (raise-argument-error who
-                              "(or/c path-string? 'directory #f)"
-                              copy-from))
-      (unless (or (not base-dir) (path-string? base-dir))
-        (raise-argument-error who
-                              "(or/c path-string? #f)"
-                              base-dir))
-      (unless (string? template)
-        (raise-argument-error who "string?" template))
-      (let* ([result
-              (with-handlers ([exn:fail:contract?
-                               (lambda (x)
-                                 (raise-arguments-error
-                                  who
-                                  "malformed template"
-                                  "expected" (unquoted-printing-string
-                                              "a format string accepting 1 string argument")
-                                  "given" template))])
-                ;; docs promise argument will be a string containing only digits
-                (format template "0"))])
-        (unless (path-string? result)
-          (raise-arguments-error
-           who
-           "given template produced an invalid path"
-           "promised" (unquoted-printing-string "path-string?")
-           "produced" result
-           "template" template))
-        (define (bad-result-msg details)
-          ;; i.e. the result is valid as path, but not for our purposes
-          (string-append "given template produced an invalid result;\n " details))
-        (when (and base-dir (complete-path? result))
-          ;; On Windows, base-dir could be a drive specification,
-          ;; in which case it is ok for result to be an absolute path without a drive.
-          (raise-arguments-error
-           who
-           (bad-result-msg "complete path can not be combined with base-dir")
-           "template" template
-           "produced" result
-           "base-dir" base-dir))
-        (unless (eq? 'directory copy-from)
-          (when (let-values ([{_base _name must-be-dir?}
-                              (split-path result)])
-                  must-be-dir?)
-            (raise-arguments-error
-             who
-             (bad-result-msg
-              "syntactic directory path not allowed unless copy-from is 'directory")
-             "template" template
-             "produced" result
-             "copy-from" copy-from))))
-      (let ([tmpdir (find-system-path 'temp-dir)])
-        (let loop ([s (current-seconds)]
-                   [ms (inexact->exact (truncate (current-inexact-milliseconds)))]
-                   [tries 0])
-          (let ([pth (path->complete-path
-                      (let ([n (format template (format "~a~a" s ms))])
-                        (cond [base-dir (build-path base-dir n)]
-                              [(relative-path? n) (build-path tmpdir n)]
-                              [else n])))])
-            (with-handlers ([(lambda (exn)
-                               (or (exn:fail:filesystem:exists? exn)
-                                   (and (exn:fail:filesystem:errno? exn)
-                                        (let ([errno (exn:fail:filesystem:errno-errno exn)])
-                                          (and (eq? 'windows (cdr errno))
-                                               (eqv? (car errno) 5) ; ERROR_ACCESS_DENIED
-                                               ;; On Windows, if the target path refers to a file
-                                               ;; that has been deleted but is still open
-                                               ;; somewhere, then an access-denied error is reported
-                                               ;; instead of a file-exists error; there appears
-                                               ;; to be no way to detect that it was really a
-                                               ;; file-still-exists error. Try again for a while.
-                                               ;; There's still a small chance that this will
-                                               ;; fail, but it's vanishingly small at 32 tries.
-                                               ;; If ERROR_ACCESS_DENIED really is the right
-                                               ;; error (e.g., because the target directory is not
-                                               ;; writable), we'll take longer to get there.
-                                               (tries . < . 32))))))
-                             (lambda (x)
-                               ;; try again with a new name
-                               (loop (- s (random 10))
-                                     (+ ms (random 10))
-                                     (add1 tries)))])
-              (if copy-from
-                  (if (eq? copy-from 'directory)
-                      (make-directory pth)
-                      (copy-file copy-from pth))
-                  (close-output-port (open-output-file pth)))
-              pth)))))
+      (do-make-temporary-file/directory:format 'make-temporary-directory
+                                               template 'directory base-dir))
+    
     (values make-temporary-file
             make-temporary-directory)))
+
+(define-for-syntax ((temporary-file/directory*-transformer proc-id ctxt-id kws) stx)
+  (with-syntax ([app (datum->syntax stx #'#%app stx)])
+    (syntax-case stx ()
+      [x
+       (identifier? #'x)
+       proc-id]
+      [(_ . whatever)
+       (let/ec return
+         (define (fail . _)
+           (return #`(app #,proc-id . whatever)))
+         (define (check-expr stx ctxt)
+           (when (keyword? (syntax-e stx))
+             (fail))
+           stx)
+         (define options
+           (parse-keyword-options/eol
+            #:context stx
+            #'whatever
+            (map (λ (kw+default)
+                   (list (car kw+default) check-expr))
+                 kws)
+            #:no-duplicates? #t
+            #:on-incompatible fail
+            #:on-too-short fail
+            #:on-not-in-table fail
+            #:on-not-eol fail))
+         #`(app #,ctxt-id
+                '#,(infer-temporary-file-context-bytes stx)
+                #,@(map (λ (kw+default)
+                          (options-select-value options
+                                                (car kw+default)
+                                                #:default (cadr kw+default)))
+                        kws)))])))
+
+(define-syntax make-temporary-file*
+  (temporary-file/directory*-transformer
+   #'make-temporary-file*/proc
+   #'make-temporary-file*/context
+   `([#:prefix ,#''#""]
+     [#:suffix ,#''#""]
+     [#:copy-from ,#''#f]
+     [#:base-dir ,#''#f])))
+
+(define-syntax make-temporary-directory*
+  (temporary-file/directory*-transformer
+   #'make-temporary-directory*/proc
+   #'make-temporary-directory*/context
+   `([#:prefix ,#''#""]
+     [#:suffix ,#''#""]
+     [#:base-dir ,#''#f])))
+
+
+(define-values [make-temporary-file*/proc
+                make-temporary-directory*/proc]
+  (let ()
+    (define (make-temporary-file* #:prefix [prefix #""]
+                                  #:suffix [suffix #""]
+                                  #:copy-from [copy-from #f]
+                                  #:base-dir [base-dir #f])
+      (make-temporary-file*/context #"" prefix suffix copy-from base-dir))
+    (define (make-temporary-directory* #:prefix [prefix #""]
+                                       #:suffix [suffix #""]
+                                       #:base-dir [base-dir #f])
+      (make-temporary-directory*/context #"" prefix suffix base-dir))
+    (values make-temporary-file*
+            make-temporary-directory*)))
+
+(define (make-temporary-file*/context ctxt prefix suffix copy-from base-dir)
+  (do-make-temporary-file/directory:bytes-append
+   ctxt prefix suffix copy-from base-dir
+   #:directory? #f))
+
+(define (make-temporary-directory*/context ctxt prefix suffix base-dir)
+  (do-make-temporary-file/directory:bytes-append
+   ctxt prefix suffix 'directory base-dir
+   #:directory? #t))
+
 
 ;;  Open a temporary path for writing, automatically renames after,
 ;;  and arranges to delete path if there's an exception. Uses the an
