@@ -1412,7 +1412,11 @@ produce an absolute path, in which case
 @racket[base-dir] is provided and non-@racket[#false],
 @racket[template] must not produce a @tech{complete} path,
 and @racket[base-dir] will be used instead of
-@racket[(find-system-path 'temp-dir)].
+@racket[(find-system-path 'temp-dir)]. Using
+@racket[base-dir] is generally more reliable than including
+directory components in @racket[template]: it avoids subtle
+bugs from manipulating paths as string and eleminates the
+need to sanitize @racket[format] escape sequences.
 
 On Windows, @racket[template] may produce an absolute path
 which is not a complete path (see @secref["windowspaths"])
@@ -1464,12 +1468,12 @@ needed.
  from generating a @racket[template] using the source location.
  
 @history[
- #:changed "8.1.0.6"
+ #:changed "8.2.0.8"
  @elem{Added the @racket[#:copy-from] or @racket[#:base-dir] arguments.}]}
 
 @defproc[(make-temporary-directory [template string? "rkttmp~a"]
                                    [#:base-dir base-dir (or/c path-string? #f) #f])
-         path?]{
+         (and/c path? complete-path?)]{
 
  Like @racket[make-temporary-file], but
  creates a directory, rather than a regular file.
@@ -1482,7 +1486,34 @@ needed.
  information is available.
 
 @history[
- #:added "8.1.0.6"
+ #:added "8.2.0.8"
+ ]}
+
+@deftogether[
+ (@defproc[(make-temporary-file* [#:prefix prefix bytes? #""]
+                                 [#:suffix suffix bytes? #""]
+                                 [#:copy-from copy-from (or/c path-string? #f) #f]
+                                 [#:base-dir base-dir (or/c path-string? #f) #f])
+           (and/c path? complete-path?)]
+   @defproc[(make-temporary-directory* [#:prefix prefix bytes? #""]
+                                       [#:suffix suffix bytes? #""]
+                                       [#:base-dir base-dir (or/c path-string? #f) #f])
+            (and/c path? complete-path?)])]{
+
+ Like @racket[make-temporary-file] and
+ @racket[make-temporary-directory], respectively, but, rather
+ than using a template for @racket[format], the path is based
+ on @racket[(bytes-append prefix generated suffix)], where
+ @racket[generated] is a byte string chosen by the
+ implementation to produce a unique path. If there is source
+ location information for the callsite of
+ @racket[make-temporary-file*] or
+ @racket[make-temporary-directory*], @racket[generated] will
+ incorporate that information. The resulting path is combined
+ with @racket[base-dir] as with @racket[make-temorary-file].
+
+ @history[
+ #:added "8.2.0.8"
  ]}
 
 @defproc[(call-with-atomic-output-file [file path-string?] 
