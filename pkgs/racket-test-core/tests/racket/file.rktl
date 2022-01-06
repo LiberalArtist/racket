@@ -357,13 +357,13 @@
 (test 'make-temporary-file object-name make-temporary-file)
 (let-values ([(required accepted) (procedure-keywords make-temporary-file)])
   (test '() 'make-temporary-file-no-required-keywords required)
-  (test '(#:base-dir #:copy-from) 'make-temporary-file-accepts-keywords accepted))
+  (test '(#:base-dir #:permissions #:copy-from) 'make-temporary-file-accepts-keywords accepted))
 
 (arity-test make-temporary-directory 0 1)
 (test 'make-temporary-directory object-name make-temporary-directory)
 (let-values ([(required accepted) (procedure-keywords make-temporary-directory)])
   (test '() 'make-temporary-directory-no-required-keywords required)
-  (test '(#:base-dir) 'make-temporary-file-accepts-keywords accepted))
+  (test '(#:base-dir #:permissions) 'make-temporary-directory-accepts-keywords accepted))
 
 (let ([tf (make-temporary-file)])
   (let-values ([(base name dir?) (split-path tf)])
