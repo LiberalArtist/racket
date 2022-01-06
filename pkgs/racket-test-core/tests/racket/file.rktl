@@ -414,18 +414,18 @@
 (err/rt-test (make-temporary-file "bad~x") exn:fail:contract? rx:tmp-file)
 (err/rt-test (make-temporary-directory "bad~x") exn:fail:contract? rx:tmp-dir)
 (let* ([temp-dir (find-system-path 'temp-dir)]
-       [absolute-template
-        (path->string (build-path temp-dir "absolute~a"))])
-  (define tf (make-temporary-file absolute-template))
+       [absolute-prefix
+        (path->bytes (build-path temp-dir "absolute"))])
+  (define tf (make-temporary-file* absolute-prefix #""))
   (test #t 'make-temporary-file-absolute (file-exists? tf))
   (delete-file tf)
-  (define td (make-temporary-directory absolute-template))
+  (define td (make-temporary-directory absolute-prefix #""))
   (test #t 'make-temporary-directory-absolute (directory-exists? tf))
   (delete-directory td)
-  (err/rt-test (make-temporary-file absolute-template #:base-dir temp-dir)
+  (err/rt-test (make-temporary-file* absolute-prefix #"" #:base-dir temp-dir)
                exn:fail:contract?
                rx:tmp-file)
-  (err/rt-test (make-temporary-directory absolute-template #:base-dir temp-dir)
+  (err/rt-test (make-temporary-directory absolute-prefix #"" #:base-dir temp-dir)
                exn:fail:contract?
                rx:tmp-dir))
 (let ([dir-template

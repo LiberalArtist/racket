@@ -169,9 +169,9 @@
 ;;   4. make-temporary-directory*  /
 ;;
 ;; All of these are actually macros, to support template generation from context.
-;; The procedures are named with `/proc` suffixes. For the `*` variants, there
-;; are also procedures named with `/context` suffixes, which are used when context
-;; can be inferred.
+;; The macro `define-temporary-file/directory-transformer` and compile-time function
+;; `temporary-file/directory-transformer` assist in defining those macros,
+;; mostly because we don't have `syntax-parse` here.
 ;;
 ;; The core logic is in `internal-make-temporary-file/directory`, which essentially
 ;; implements the old `make-temporary-file` protocol (before it supported keyword
@@ -426,16 +426,31 @@
   (string->bytes/utf-8 (syntax->tmp-context-string stx)))
 
 ;; temporary-file/directory-transformer
-;;   : (-> syntax? procedure? (-> syntax? syntax?))
-;; The given procedure should have no required keyword arguments and should not permit
-;; arbitrary keyword arguments (i.e. the second result of procedure-keywords should be a list)..
+;;   : (-> identifier? procedure? (-> syntax? syntax?))
+;; Produces a macro transformer procedure.
+;; The first argument must be an identifier bound at run-time
+;; to the function implementation.
+;; The second argument must be a (compile-time) procedure that:
+;;   - must have no required keyword arguments;
+;;   - must NOT permit arbitrary keyword arguments
+;;     (i.e. the second result of procedure-keywords must be a list);
+;;   - must accept two by-position arguments, namely, the full syntax object
+;;     passed to the macro invocation and the run-time identifier from the
+;;     first argument; and
+;;   - may accept additional by-position arguments.
+;; The accepted keywords of the compile-time procedure argument determine
+;; the keywords supported by the resulting macro. The by-position arity of
+;; the compile-time procedure, after adjusting for the two required by-position
+;; arguments, determines the number of by-position arguments supported by the
+;; resulting macro. When the resulting macro is used with a supported combination
+;; of keyword and by-position arguments, the compile-time procedure is invoked in
+;; tail position with the two fixed by-position arguments, plus syntax objects for
+;; the supplied keyword and by-position argument expressions. Otherwise, when the
+;; resulting macro is used with an unsupported combination of arguments, it expands
+;; to a use of the run-time identifier.
 (define-for-syntax ((temporary-file/directory-transformer proc-id infer-proc) stx)
   (define-values (_required-kws allowed-kws)
     (procedure-keywords infer-proc))
-  (define (hash-keys hsh [ordered #f])   ;
-    (hash-map hsh (λ (k v) k) ordered))  ; tmp
-  (define (hash-values hsh [ordered #f]) ;
-    (hash-map hsh (λ (k v) v) ordered))  ;
   (syntax-case stx ()
     [x
      (identifier? #'x)
@@ -469,6 +484,12 @@
               #f]))
          #`(#,proc-id . more-stx))]))
 
+;; define-temporary-file/directory-transformer
+;; Definition form of `temporary-file/directory-transformer`,
+;; with support for giving the right inferred name to an
+;; otherwise-anonymous runtime procedure.
+;; See the comments on `temporary-file/directory-transformer` for
+;; further details about the compile-time procedure.
 (define-syntax (define-temporary-file/directory-transformer stx)
   (syntax-case stx ()
     [(_ name runtime-proc-expr infer-proc-expr)

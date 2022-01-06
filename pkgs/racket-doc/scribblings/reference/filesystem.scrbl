@@ -1475,7 +1475,7 @@ arguments:
  path?]]]]
 Supplying by-position arguments prevents @racket[make-temporary-directory]
 from generating a @racket[template] using the source location.
- 
+
 @history[
  #:changed "8.3.0.11"
  @elem{Added the @racket[#:copy-from], @racket[#:base-dir],
