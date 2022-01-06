@@ -681,7 +681,7 @@ directory.}
 
 @defparam*[current-directory-for-user path path-string? (and/c path? complete-path?)]{
 
-Like @racket[current-directory], but use only by
+Like @racket[current-directory], but for use only by
 @racket[srcloc->string] for reporting paths relative to a
 directory.
 
@@ -1392,7 +1392,8 @@ will not create it.
 
 @defproc[(make-temporary-file [template string? "rkttmp~a"]
                               [#:copy-from copy-from (or/c path-string? #f 'directory) #f]
-                              [#:base-dir base-dir (or/c path-string? #f) #f])
+                              [#:base-dir base-dir (or/c path-string? #f) #f]
+                              [#:permissions permissions (integer-in 0 65535) #o600])
          (and/c path? complete-path?)]{
 
 Creates a new temporary file and returns its path.
@@ -1445,6 +1446,14 @@ then the temporary ``file'' is created as a directory:
 for clarity, prefer @racket[make-temporary-directory] for creating
 temporary directories.
 
+The @racket[permissions] argument is used as with
+@racket[open-output-file] (or @racket[make-directory], when
+applicable) to determine the initial permissions of the
+temporary file, except when @racket[copy-from] is provided
+as a path, in which case @racket[permissions] is ignored.
+The default value of @racket[permissions] limits access to
+only the creating user, which is recommended for security.
+
 When a temporary file is created, it is not opened for reading or
 writing when the path is returned. The client program calling
 @racket[make-temporary-file] is expected to open the file with the
@@ -1452,27 +1461,31 @@ desired access and flags (probably using the @racket['truncate] flag;
 see @racket[open-output-file]) and to delete it when it is no longer
 needed.
 
- For backwards compatibility, @racket[make-temporary-file]
- may be called with by-position arguments instead of keyword
- arguments:
- @; This is what specsubform would do:
- @nested[#:style "leftindent"
-         @nested[#:style "leftindent"
-                 @nested[#:style (style 'vertical-inset null)
-                         @defproc[#:link-target? #f
+For backwards compatibility, @racket[make-temporary-file]
+may be called with by-position arguments instead of keyword
+arguments:
+@; This is what specsubform would do:
+@nested[#:style "leftindent"
+        @nested[#:style "leftindent"
+                @nested[#:style (style 'vertical-inset null)
+                        @defproc[#:link-target? #f
  (make-temporary-file [template string? "rkttmp~a"]
                       [compat-copy-from (or/c path-string? #f 'directory) copy-from]
                       [compat-base-dir (or/c path-string? #f) base-dir])
  path?]]]]
- Supplying by-position arguments prevents @racket[make-temporary-directory]
- from generating a @racket[template] using the source location.
+Supplying by-position arguments prevents @racket[make-temporary-directory]
+from generating a @racket[template] using the source location.
  
 @history[
- #:changed "8.2.0.8"
- @elem{Added the @racket[#:copy-from] or @racket[#:base-dir] arguments.}]}
+ #:changed "8.3.0.11"
+ @elem{Added the @racket[#:copy-from], @racket[#:base-dir],
+   and @racket[#:permissions] arguments. Changed the
+   previously-implicit default permissions.}
+ ]}
 
 @defproc[(make-temporary-directory [template string? "rkttmp~a"]
-                                   [#:base-dir base-dir (or/c path-string? #f) #f])
+                                   [#:base-dir base-dir (or/c path-string? #f) #f]
+                                   [#:permissions permissions (integer-in 0 65535) #o600])
          (and/c path? complete-path?)]{
 
  Like @racket[make-temporary-file], but
@@ -1486,18 +1499,20 @@ needed.
  information is available.
 
 @history[
- #:added "8.2.0.8"
+ #:added "8.3.0.11"
  ]}
 
 @deftogether[
- (@defproc[(make-temporary-file* [#:prefix prefix bytes? #""]
-                                 [#:suffix suffix bytes? #""]
+ (@defproc[(make-temporary-file* [prefix bytes?]
+                                 [suffix bytes?]
                                  [#:copy-from copy-from (or/c path-string? #f) #f]
-                                 [#:base-dir base-dir (or/c path-string? #f) #f])
+                                 [#:base-dir base-dir (or/c path-string? #f) #f]
+                                 [#:permissions permissions (integer-in 0 65535) #o600])
            (and/c path? complete-path?)]
-   @defproc[(make-temporary-directory* [#:prefix prefix bytes? #""]
-                                       [#:suffix suffix bytes? #""]
-                                       [#:base-dir base-dir (or/c path-string? #f) #f])
+   @defproc[(make-temporary-directory* [prefix bytes?]
+                                       [suffix bytes?]
+                                       [#:base-dir base-dir (or/c path-string? #f) #f]
+                                       [#:permissions permissions (integer-in 0 65535) #o600])
             (and/c path? complete-path?)])]{
 
  Like @racket[make-temporary-file] and
@@ -1513,7 +1528,7 @@ needed.
  with @racket[base-dir] as with @racket[make-temorary-file].
 
  @history[
- #:added "8.2.0.8"
+ #:added "8.3.0.11"
  ]}
 
 @defproc[(call-with-atomic-output-file [file path-string?] 

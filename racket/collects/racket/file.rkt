@@ -232,9 +232,12 @@
 
 (define (check-base-dir who base-dir)
   (unless (or (not base-dir) (path-string? base-dir))
-    (raise-argument-error who
-                          "(or/c path-string? #f)"
-                          base-dir)))
+    (raise-argument-error who "(or/c path-string? #f)" base-dir)))
+
+(define (check-permissions who permissions)
+  (unless (and (exact-nonnegative-integer? permissions)
+               (<= permissions 65535))
+    (raise-argument-error who "(integer-in 0 65535)" permissions)))
 
 (define (check-bytes who x)
   (unless (bytes? x)
@@ -267,6 +270,7 @@
                           "(or/c path-string? 'directory #f)"
                           copy-from))
   (check-base-dir who base-dir)
+  (check-permissions who permissions)
   (unless (string? template)
     (raise-argument-error who "string?" template))
   (define (make-name digits-str)
@@ -326,6 +330,7 @@
   (check-bytes who prefix)
   (check-bytes who suffix)
   (check-base-dir who base-dir)
+  (check-permissions who permissions)
   (unless (or directory?
               (not copy-from)
               (path-string? copy-from))
@@ -478,12 +483,12 @@
 (define-temporary-file/directory-transformer make-temporary-file
   (λ ([template "rkttmp~a"]
       #:permissions [permissions #o600]
-      #:copy-from [_copy-from #f]
-      #:base-dir [_base-dir #f]
-      [copy-from _copy-from]
-      [base-dir _base-dir])
+      #:copy-from [copy-from #f]
+      #:base-dir [base-dir #f]
+      [compat-copy-from copy-from]
+      [compat-base-dir base-dir])
     (do-make-temporary-file/directory:format 'make-temporary-file
-                                             template copy-from permissions base-dir))
+                                             template compat-copy-from permissions compat-base-dir))
   (λ (#:copy-from [copy-from #''#f]
       #:permissions [permissions #''#o600]
       #:base-dir [base-dir #''#f]
