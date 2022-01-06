@@ -349,7 +349,7 @@
    who copy-from permissions base-dir
    (λ (digits-str)
      (bytes->path (make-name/bytes digits-str)))
-   #:wraped-make-name
+   #:wrapped-make-name
    (λ (digits-str)
      (define bs (make-name/bytes digits-str))
      (with-handlers ([exn:fail?
