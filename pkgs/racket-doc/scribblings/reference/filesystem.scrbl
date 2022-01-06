@@ -1393,7 +1393,7 @@ will not create it.
 @defproc[(make-temporary-file [template string? "rkttmp~a"]
                               [#:copy-from copy-from (or/c path-string? #f 'directory) #f]
                               [#:base-dir base-dir (or/c path-string? #f) #f]
-                              [#:permissions permissions (integer-in 0 65535) #o600])
+                              [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
          (and/c path? complete-path?)]{
 
 Creates a new temporary file and returns its path.
@@ -1446,13 +1446,22 @@ then the temporary ``file'' is created as a directory:
 for clarity, prefer @racket[make-temporary-directory] for creating
 temporary directories.
 
-The @racket[permissions] argument is used as with
-@racket[open-output-file] (or @racket[make-directory], when
-applicable) to determine the initial permissions of the
-temporary file, except when @racket[copy-from] is provided
-as a path, in which case @racket[permissions] is ignored.
-The default value of @racket[permissions] limits access to
-only the creating user, which is recommended for security.
+The @racket[permissions] argument determines the initial
+permissions of the temporary file, except when
+@racket[copy-from] is provided as a path, in which case
+@racket[permissions] is ignored. When @racket[permissions]
+is a number, it is used as with @racket[open-output-file]
+(or @racket[make-directory], when applicable). Supplying
+@racket[#f] for @racket[permissions] chooses permissions
+that limits access to only the creating user, which is
+recommended for security.
+@margin-note{
+  More specifically, using @racket[#f] as @racket[permissions]
+  is equivalent to:
+  @racketblock[(if (eq? copy-from 'directory)
+                   #o700
+                   #o600)]
+}
 
 When a temporary file is created, it is not opened for reading or
 writing when the path is returned. The client program calling
@@ -1485,7 +1494,7 @@ from generating a @racket[template] using the source location.
 
 @defproc[(make-temporary-directory [template string? "rkttmp~a"]
                                    [#:base-dir base-dir (or/c path-string? #f) #f]
-                                   [#:permissions permissions (integer-in 0 65535) #o600])
+                                   [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
          (and/c path? complete-path?)]{
 
  Like @racket[make-temporary-file], but
@@ -1507,12 +1516,12 @@ from generating a @racket[template] using the source location.
                                  [suffix bytes?]
                                  [#:copy-from copy-from (or/c path-string? #f) #f]
                                  [#:base-dir base-dir (or/c path-string? #f) #f]
-                                 [#:permissions permissions (integer-in 0 65535) #o600])
+                                 [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
            (and/c path? complete-path?)]
    @defproc[(make-temporary-directory* [prefix bytes?]
                                        [suffix bytes?]
                                        [#:base-dir base-dir (or/c path-string? #f) #f]
-                                       [#:permissions permissions (integer-in 0 65535) #o600])
+                                       [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
             (and/c path? complete-path?)])]{
 
  Like @racket[make-temporary-file] and

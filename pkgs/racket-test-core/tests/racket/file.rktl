@@ -357,7 +357,7 @@
 (test 'make-temporary-file object-name make-temporary-file)
 (let-values ([(required accepted) (procedure-keywords make-temporary-file)])
   (test '() 'make-temporary-file-no-required-keywords required)
-  (test '(#:base-dir #:permissions #:copy-from) 'make-temporary-file-accepts-keywords accepted))
+  (test '(#:base-dir #:copy-from #:permissions) 'make-temporary-file-accepts-keywords accepted))
 
 (arity-test make-temporary-directory 0 1)
 (test 'make-temporary-directory object-name make-temporary-directory)
@@ -420,7 +420,7 @@
   (test #t 'make-temporary-file-absolute (file-exists? tf))
   (delete-file tf)
   (define td (make-temporary-directory* absolute-prefix #""))
-  (test #t 'make-temporary-directory-absolute (directory-exists? tf))
+  (test #t 'make-temporary-directory-absolute (directory-exists? td))
   (delete-directory td)
   (err/rt-test (make-temporary-file* absolute-prefix #"" #:base-dir temp-dir)
                exn:fail:contract?
