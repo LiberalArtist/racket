@@ -419,13 +419,13 @@
   (define tf (make-temporary-file* absolute-prefix #""))
   (test #t 'make-temporary-file-absolute (file-exists? tf))
   (delete-file tf)
-  (define td (make-temporary-directory absolute-prefix #""))
+  (define td (make-temporary-directory* absolute-prefix #""))
   (test #t 'make-temporary-directory-absolute (directory-exists? tf))
   (delete-directory td)
   (err/rt-test (make-temporary-file* absolute-prefix #"" #:base-dir temp-dir)
                exn:fail:contract?
                rx:tmp-file)
-  (err/rt-test (make-temporary-directory absolute-prefix #"" #:base-dir temp-dir)
+  (err/rt-test (make-temporary-directory* absolute-prefix #"" #:base-dir temp-dir)
                exn:fail:contract?
                rx:tmp-dir))
 (let ([dir-template
