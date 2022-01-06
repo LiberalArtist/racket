@@ -1454,14 +1454,13 @@ is a number, it is used as with @racket[open-output-file]
 (or @racket[make-directory], when applicable). Supplying
 @racket[#f] for @racket[permissions] chooses permissions
 that limits access to only the creating user, which is
-recommended for security.
-@margin-note{
-  More specifically, using @racket[#f] as @racket[permissions]
-  is equivalent to:
-  @racketblock[(if (eq? copy-from 'directory)
-                   #o700
-                   #o600)]
-}
+recommended for security. More specifically, using @racket[#f]
+as @racket[permissions] is equivalent to:
+ @racketblock[
+ (if (eq? copy-from 'directory)
+     (bitwise-ior user-read-bit user-write-bit user-execute-bit)
+     (bitwise-ior user-read-bit user-write-bit))
+ ]
 
 When a temporary file is created, it is not opened for reading or
 writing when the path is returned. The client program calling
