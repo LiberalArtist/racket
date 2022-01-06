@@ -3,7 +3,6 @@
          setup/dirs
          setup/cross-system
          (for-syntax racket/base
-                     syntax/keyword
                      setup/path-to-relative))
 
 (provide delete-directory/files
@@ -188,7 +187,7 @@
 ;; various possible errors with the result.
 ;; If the tests pass, it tail-calls `internal-make-temporary-file/directory`.
 
-(define (internal-make-temporary-file/directory who copy-from base-dir make-name)
+(define (internal-make-temporary-file/directory who copy-from permissions base-dir make-name)
   (define tmpdir (find-system-path 'temp-dir))
   (let loop ([s (current-seconds)]
              [ms (inexact->exact (truncate (current-inexact-milliseconds)))]
@@ -226,9 +225,9 @@
                              (add1 tries)))])
       (if copy-from
           (if (eq? copy-from 'directory)
-              (make-directory pth)
-              (copy-file copy-from pth))
-          (close-output-port (open-output-file pth)))
+              (make-directory pth permissions)
+              (copy-file copy-from pth)) ;; ?? permissions ??
+          (close-output-port (open-output-file pth #:permissions permissions)))
       pth)))
 
 (define (check-base-dir who base-dir)
@@ -236,12 +235,13 @@
     (raise-argument-error who
                           "(or/c path-string? #f)"
                           base-dir)))
+
 (define (check-bytes who x)
   (unless (bytes? x)
     (raise-argument-error who "bytes?" x)))
 
 (define (do-make-temporary-file/directory:check-make-name
-         who copy-from base-dir make-name
+         who copy-from permissions base-dir make-name
          #:wrapped-make-name wraped-make-name
          #:complete-with-base-error complete-with-base-error
          #:syntactic-directory-error syntactic-directory-error)
@@ -257,9 +257,9 @@
                         (split-path result)])
             must-be-dir?)
       (syntactic-directory-error result)))
-  (internal-make-temporary-file/directory who copy-from base-dir make-name))
+  (internal-make-temporary-file/directory who copy-from permissions base-dir make-name))
 
-(define (do-make-temporary-file/directory:format who template copy-from base-dir)
+(define (do-make-temporary-file/directory:format who template copy-from permissions base-dir)
   (unless (or (not copy-from)
               (path-string? copy-from)
               (eq? copy-from 'directory))
@@ -275,7 +275,7 @@
     ;; i.e. the result is valid as path, but not for our purposes
     (string-append "given template produced an invalid result;\n " details))
   (do-make-temporary-file/directory:check-make-name
-   who copy-from base-dir make-name
+   who copy-from permissions base-dir make-name
    #:wrapped-make-name
    (λ (digits-str)
      (define result
@@ -317,7 +317,7 @@
       "copy-from" copy-from))))
 
 (define (do-make-temporary-file/directory:bytes-append
-         ctxt prefix suffix copy-from base-dir
+         ctxt prefix suffix copy-from permissions base-dir
          #:directory? directory?)
   (define who
     (if directory?
@@ -341,7 +341,7 @@
     ;; i.e. the result is valid as path, but not for our purposes
     (string-append "given prefix and suffix produced an invalid result;\n " details))
   (do-make-temporary-file/directory:check-make-name
-   who copy-from base-dir
+   who copy-from permissions base-dir
    (λ (digits-str)
      (bytes->path (make-name/bytes digits-str)))
    #:wraped-make-name
@@ -376,7 +376,6 @@
       "produced" result
       "base-dir" base-dir))))
 
-
 (define-for-syntax (syntax->tmp-context-string stx)
   (define line   (syntax-line stx))
   (define col    (syntax-column stx))
@@ -394,7 +393,14 @@
           [pos (format "--~a" pos)]
           [else ""]))
   (define combined-str (string-append (or str-src "rkttmp") str-loc))
-  (define sanitized-str (regexp-replace* #rx"[<>:\"/\\|]" combined-str "-"))
+  (define sanitize-rx
+    ;; Keep this in sync with IS_SPEC_CHAR() from racket/src/bc/src/file.c
+    ;; and protect-path-element from racket/src/io/path/protect.rkt.
+    ;; In addition to the characters handled by both of those,
+    ;; we also need to treat ~ as special, since we may be producing
+    ;; format string.
+    #rx"[<>:\"/\\|?*~]")
+  (define sanitized-str (regexp-replace* sanitize-rx combined-str "-"))
   (define max-len 50) ;; must be even
   (define not-too-long-str
     (cond [(< max-len (string-length sanitized-str))
@@ -414,148 +420,125 @@
   ;; successfully by Racket from time immemorial.
   (string->bytes/utf-8 (syntax->tmp-context-string stx)))
 
-(define-syntax (make-temporary-directory stx)
-  (with-syntax ([app (datum->syntax stx #'#%app stx)])
-    (syntax-case stx ()
-      [x
-       (identifier? #'x)
-       #'make-temporary-directory/proc]
-      [(_)
-       #`(app make-temporary-directory/proc
-              '#,(infer-temporary-file-template stx))]
-      [(_ #:base-dir base-dir)
-       (not (keyword? #'base-dir))
-       #`(app make-temporary-directory/proc
-              '#,(infer-temporary-file-template stx)
-              #:base-dir base-dir)]
-      [(_ . whatever)
-       #'(app make-temporary-directory/proc . whatever)])))
+;; temporary-file/directory-transformer
+;;   : (-> syntax? procedure? (-> syntax? syntax?))
+;; The given procedure should have no required keyword arguments and should not permit
+;; arbitrary keyword arguments (i.e. the second result of procedure-keywords should be a list)..
+(define-for-syntax ((temporary-file/directory-transformer proc-id infer-proc) stx)
+  (define-values (_required-kws allowed-kws)
+    (procedure-keywords infer-proc))
+  (define (hash-keys hsh [ordered #f])   ;
+    (hash-map hsh (λ (k v) k) ordered))  ; tmp
+  (define (hash-values hsh [ordered #f]) ;
+    (hash-map hsh (λ (k v) v) ordered))  ;
+  (syntax-case stx ()
+    [x
+     (identifier? #'x)
+     proc-id]
+    [(_ . more-stx)
+     (or (let loop ([args '()]
+                    [kws #hasheq()]
+                    [stx* #'more-stx])
+           (syntax-case stx* ()
+             [()
+              (and (procedure-arity-includes? infer-proc (+ 2 (length args)))
+                   (keyword-apply infer-proc
+                                  (hash-keys kws 'ordered)
+                                  (hash-values kws 'ordered)
+                                  stx
+                                  proc-id
+                                  (reverse args)))]
+             [(kw-stx val . more-stx)
+              (memq (syntax-e #'kw-stx) allowed-kws) ;; implies `keyword?`
+              (let ([kw (syntax-e #'kw-stx)])
+                (and (not (hash-has-key? kws kw))
+                     (not (keyword? (syntax-e #'val)))
+                     (loop args (hash-set kws kw #'val) #'more-stx)))]
+             [(arg . more-stx)
+              (not (keyword? (syntax-e #'arg)))
+              ;; don't check `procedure-arity-includes?` here,
+              ;; because there may be a minimum number of required
+              ;; by-position arguments
+              (loop (cons #'arg args) kws #'more-stx)]
+             [_
+              #f]))
+         #`(#,proc-id . more-stx))]))
 
-(define-syntax (make-temporary-file stx)
-  (with-syntax ([app (datum->syntax stx #'#%app stx)])
-    (define (infer-template #:copy-from [copy-from #''#f]
-                            #:base-dir [base-dir #''#f])
-      #`(app make-temporary-file/proc
+(define-syntax (define-temporary-file/directory-transformer stx)
+  (syntax-case stx ()
+    [(_ name runtime-proc-expr infer-proc-expr)
+     (with-syntax ([(tmp) (generate-temporaries #'(name))])
+       #`(begin
+           (define tmp
+             (let ([name runtime-proc-expr])
+               name))
+           (define-syntax name
+             (temporary-file/directory-transformer #'tmp infer-proc-expr))))]))
+
+(define-temporary-file/directory-transformer make-temporary-file
+  (λ ([template "rkttmp~a"]
+      #:permissions [permissions #o600]
+      #:copy-from [_copy-from #f]
+      #:base-dir [_base-dir #f]
+      [copy-from _copy-from]
+      [base-dir _base-dir])
+    (do-make-temporary-file/directory:format 'make-temporary-file
+                                             template copy-from permissions base-dir))
+  (λ (#:copy-from [copy-from #''#f]
+      #:permissions [permissions #''#o600]
+      #:base-dir [base-dir #''#f]
+      stx proc-id)
+    #`(#%app #,proc-id
              '#,(infer-temporary-file-template stx)
              #,copy-from
-             #,base-dir))
-    (syntax-case stx ()
-      [x
-       (identifier? #'x)
-       #'make-temporary-file/proc]
-      [(_)
-       (infer-template)]
-      [(_ #:copy-from copy-from)
-       (not (keyword? #'copy-from))
-       (infer-template #:copy-from #'copy-from)]
-      [(_ #:base-dir base-dir)
-       (not (keyword? #'base-dir))
-       (infer-template #:base-dir #'base-dir)]
-      [(_ #:base-dir base-dir #:copy-from copy-from)
-       (not (or (keyword? #'base-dir)
-                (keyword? #'copy-from)))
-       (infer-template #:copy-from #'copy-from #:base-dir #'base-dir)]
-      [(_ #:copy-from copy-from #:base-dir base-dir )
-       (not (or (keyword? #'base-dir)
-                (keyword? #'copy-from)))
-       (infer-template #:copy-from #'copy-from #:base-dir #'base-dir)]
-      [(_ . whatever)
-       #'(app make-temporary-file/proc . whatever)])))
+             #,base-dir
+             #:permissions #,permissions)))
 
-(define-values [make-temporary-file/proc
-                make-temporary-directory/proc]
-  (let ()
-    (define (make-temporary-file [template "rkttmp~a"]
-                                 #:copy-from [_copy-from #f]
-                                 #:base-dir [_base-dir #f]
-                                 [copy-from _copy-from]
-                                 [base-dir _base-dir])
-      (do-make-temporary-file/directory:format 'make-temporary-file
-                                               template copy-from base-dir))
-    (define (make-temporary-directory [template "rkttmp~a"]
-                                      #:base-dir [base-dir #f])
-      (do-make-temporary-file/directory:format 'make-temporary-directory
-                                               template 'directory base-dir))
-    
-    (values make-temporary-file
-            make-temporary-directory)))
+(define-temporary-file/directory-transformer make-temporary-directory
+  (λ ([template "rkttmp~a"]
+      #:permissions [permissions #o600]
+      #:base-dir [base-dir #f])
+    (do-make-temporary-file/directory:format 'make-temporary-directory
+                                             template 'directory permissions base-dir))
+   (λ (#:permissions [permissions #''#o600]
+       #:base-dir [base-dir #''#f]
+       stx proc-id)
+     #`(#%app #,proc-id
+              '#,(infer-temporary-file-template stx)
+              #:permissions #,permissions
+              #:base-dir #,base-dir)))
 
-(define-for-syntax ((temporary-file/directory*-transformer proc-id ctxt-id kws) stx)
-  (with-syntax ([app (datum->syntax stx #'#%app stx)])
-    (syntax-case stx ()
-      [x
-       (identifier? #'x)
-       proc-id]
-      [(_ . whatever)
-       (let/ec return
-         (define (fail . _)
-           (return #`(app #,proc-id . whatever)))
-         (define (check-expr stx ctxt)
-           (when (keyword? (syntax-e stx))
-             (fail))
-           stx)
-         (define options
-           (parse-keyword-options/eol
-            #:context stx
-            #'whatever
-            (map (λ (kw+default)
-                   (list (car kw+default) check-expr))
-                 kws)
-            #:no-duplicates? #t
-            #:on-incompatible fail
-            #:on-too-short fail
-            #:on-not-in-table fail
-            #:on-not-eol fail))
-         #`(app #,ctxt-id
-                '#,(infer-temporary-file-context-bytes stx)
-                #,@(map (λ (kw+default)
-                          (options-select-value options
-                                                (car kw+default)
-                                                #:default (cadr kw+default)))
-                        kws)))])))
+(define-temporary-file/directory-transformer make-temporary-file*
+  (λ (#:copy-from [copy-from #f]
+      #:permissions [permissions #o600]
+      #:base-dir [base-dir #f]
+      prefix suffix)
+    (do-make-temporary-file/directory:bytes-append
+     #"" prefix suffix copy-from permissions base-dir
+     #:directory? #f))
+  (λ (#:copy-from [copy-from #''#f]
+      #:permissions [permissions #''#o600]
+      #:base-dir [base-dir #''#f]
+      stx proc-id prefix suffix)
+    #`(#%app do-make-temporary-file/directory:bytes-append
+             #,(infer-temporary-file-context-bytes stx)
+             #,prefix #,suffix #,copy-from #,permissions #,base-dir
+             #:directory? #f)))
 
-(define-syntax make-temporary-file*
-  (temporary-file/directory*-transformer
-   #'make-temporary-file*/proc
-   #'make-temporary-file*/context
-   `([#:prefix ,#''#""]
-     [#:suffix ,#''#""]
-     [#:copy-from ,#''#f]
-     [#:base-dir ,#''#f])))
-
-(define-syntax make-temporary-directory*
-  (temporary-file/directory*-transformer
-   #'make-temporary-directory*/proc
-   #'make-temporary-directory*/context
-   `([#:prefix ,#''#""]
-     [#:suffix ,#''#""]
-     [#:base-dir ,#''#f])))
-
-
-(define-values [make-temporary-file*/proc
-                make-temporary-directory*/proc]
-  (let ()
-    (define (make-temporary-file* #:prefix [prefix #""]
-                                  #:suffix [suffix #""]
-                                  #:copy-from [copy-from #f]
-                                  #:base-dir [base-dir #f])
-      (make-temporary-file*/context #"" prefix suffix copy-from base-dir))
-    (define (make-temporary-directory* #:prefix [prefix #""]
-                                       #:suffix [suffix #""]
-                                       #:base-dir [base-dir #f])
-      (make-temporary-directory*/context #"" prefix suffix base-dir))
-    (values make-temporary-file*
-            make-temporary-directory*)))
-
-(define (make-temporary-file*/context ctxt prefix suffix copy-from base-dir)
-  (do-make-temporary-file/directory:bytes-append
-   ctxt prefix suffix copy-from base-dir
-   #:directory? #f))
-
-(define (make-temporary-directory*/context ctxt prefix suffix base-dir)
-  (do-make-temporary-file/directory:bytes-append
-   ctxt prefix suffix 'directory base-dir
-   #:directory? #t))
+(define-temporary-file/directory-transformer make-temporary-directory*
+  (λ (#:permissions [permissions #o600]
+      #:base-dir [base-dir #f]
+      prefix suffix)
+    (do-make-temporary-file/directory:bytes-append
+     #"" prefix suffix 'directory permissions base-dir
+     #:directory? #t))
+  (λ (#:permissions [permissions #''#o600]
+      #:base-dir [base-dir #''#f]
+      stx proc-id prefix suffix)
+    #`(#%app do-make-temporary-file/directory:bytes-append
+             #,(infer-temporary-file-context-bytes stx)
+             #,prefix #,suffix 'directory #,permissions #,base-dir
+             #:directory? #t)))
 
 
 ;;  Open a temporary path for writing, automatically renames after,
