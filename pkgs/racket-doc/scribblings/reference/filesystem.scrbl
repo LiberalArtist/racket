@@ -1392,8 +1392,7 @@ will not create it.
 
 @defproc[(make-temporary-file [template string? "rkttmp~a"]
                               [#:copy-from copy-from (or/c path-string? #f 'directory) #f]
-                              [#:base-dir base-dir (or/c path-string? #f) #f]
-                              [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
+                              [#:base-dir base-dir (or/c path-string? #f) #f])
          (and/c path? complete-path?)]{
 
 Creates a new temporary file and returns its path.
@@ -1446,22 +1445,6 @@ then the temporary ``file'' is created as a directory:
 for clarity, prefer @racket[make-temporary-directory] for creating
 temporary directories.
 
-The @racket[permissions] argument determines the initial
-permissions of the temporary file, except when
-@racket[copy-from] is provided as a path, in which case
-@racket[permissions] is ignored. When @racket[permissions]
-is a number, it is used as with @racket[open-output-file]
-(or @racket[make-directory], when applicable). Supplying
-@racket[#f] for @racket[permissions] chooses permissions
-that limits access to only the creating user, which is
-recommended for security. More specifically, using @racket[#f]
-as @racket[permissions] is equivalent to:
- @racketblock[
- (if (eq? copy-from 'directory)
-     (bitwise-ior user-read-bit user-write-bit user-execute-bit)
-     (bitwise-ior user-read-bit user-write-bit))
- ]
-
 When a temporary file is created, it is not opened for reading or
 writing when the path is returned. The client program calling
 @racket[make-temporary-file] is expected to open the file with the
@@ -1485,15 +1468,12 @@ Supplying by-position arguments prevents @racket[make-temporary-directory]
 from generating a @racket[template] using the source location.
 
 @history[
- #:changed "8.3.0.11"
- @elem{Added the @racket[#:copy-from], @racket[#:base-dir],
-   and @racket[#:permissions] arguments. Changed the
-   previously-implicit default permissions.}
+ #:changed "8.4.0.2"
+ @elem{Added the @racket[#:copy-from] and @racket[#:base-dir] arguments.}
  ]}
 
 @defproc[(make-temporary-directory [template string? "rkttmp~a"]
-                                   [#:base-dir base-dir (or/c path-string? #f) #f]
-                                   [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
+                                   [#:base-dir base-dir (or/c path-string? #f) #f])
          (and/c path? complete-path?)]{
 
  Like @racket[make-temporary-file], but
@@ -1507,20 +1487,18 @@ from generating a @racket[template] using the source location.
  information is available.
 
 @history[
- #:added "8.3.0.11"
+ #:added "8.4.0.2"
  ]}
 
 @deftogether[
  (@defproc[(make-temporary-file* [prefix bytes?]
                                  [suffix bytes?]
                                  [#:copy-from copy-from (or/c path-string? #f) #f]
-                                 [#:base-dir base-dir (or/c path-string? #f) #f]
-                                 [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
+                                 [#:base-dir base-dir (or/c path-string? #f) #f])
            (and/c path? complete-path?)]
    @defproc[(make-temporary-directory* [prefix bytes?]
                                        [suffix bytes?]
-                                       [#:base-dir base-dir (or/c path-string? #f) #f]
-                                       [#:permissions permissions (or/c #f (integer-in 0 65535)) #f])
+                                       [#:base-dir base-dir (or/c path-string? #f) #f])
             (and/c path? complete-path?)])]{
 
  Like @racket[make-temporary-file] and
@@ -1536,7 +1514,7 @@ from generating a @racket[template] using the source location.
  with @racket[base-dir] as with @racket[make-temorary-file].
 
  @history[
- #:added "8.3.0.11"
+ #:added "8.4.0.2"
  ]}
 
 @defproc[(call-with-atomic-output-file [file path-string?] 
