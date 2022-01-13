@@ -449,25 +449,32 @@
   (define temp-dir-no-drive
     (apply build-path (cdr elems)))
   (define abs-not-complete
-    (let ([str (path->string (build-path temp-dir-no-drive "rkttmp~a"))])
-      (if (eqv? #\\ (string-ref str 0))
-          str
-          (string-append "\\" str))))
+    (let* ([pth (build-path temp-dir-no-drive "rkttmp")]
+           [bs (path->bytes pth)])
+      (if (eqv? (char->integer #\\) (bytes-ref bs 0))
+          pth
+          (bytes->path (bytes-append #"\\" bs)))))
   (test #t 'make-temporary-file-w32-abs-template (absolute-path? abs-not-complete))
   (test #f 'make-temporary-file-w32-abs-not-complete (complete-path? abs-not-complete))
-  (let ([tf (make-temporary-file abs-not-complete)])
+  (define abs-not-complete/bytes
+    (path->bytes abs-not-complete))
+  (let ([tf (make-temporary-file* abs-not-complete/bytes #"")])
     (test #t 'make-temporary-file-w32-abs-no-base-dir (file-exists? tf))
     (delete-file tf))
-  (let ([tf (make-temporary-file abs-not-complete #f drive)])
+  (let ([tf (make-temporary-file* abs-not-complete/bytes #"" #:base-dir drive)])
     (test #t 'make-temporary-file-w32-abs-base-drive (file-exists? tf))
     (delete-file tf))
   ;; no absolute template w/ relative base-dir
-  (err/rt-test (make-temporary-file abs-not-complete #f "relative") exn:fail:contract?)
+  (err/rt-test (make-temporary-file* abs-not-complete/bytes #""
+                                     #:base-dir "relative")
+               exn:fail:contract?)
   ;; no absolute template w/ driveless absolute base-dir
-  (err/rt-test (make-temporary-file abs-not-complete #f temp-dir-no-drive)
+  (err/rt-test (make-temporary-file* abs-not-complete/bytes #""
+                                     #:base-dir temp-dir-no-drive)
                exn:fail:contract?)
   ;; no absolute template w/ complete base-dir that is not just drive spec
-  (err/rt-test (make-temporary-file abs-not-complete #f (build-path drive (cadr elems)))
+  (err/rt-test (make-temporary-file* abs-not-complete/bytes #""
+                                     #:base-dir (build-path drive (cadr elems)))
                exn:fail:contract?))
 
 
