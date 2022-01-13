@@ -201,6 +201,9 @@
                [(relative-path? n) (build-path tmpdir n)]
                [else n]))))
     (with-handlers ([(lambda (exn)
+                       ;; FIXME: There should probably be a maximum number of
+                       ;; tries for other cases, too.
+                       ;; See: https://github.com/racket/racket/pull/3870#discussion_r741177829
                        (or (exn:fail:filesystem:exists? exn)
                            (and (exn:fail:filesystem:errno? exn)
                                 (let ([errno (exn:fail:filesystem:errno-errno exn)])
@@ -220,6 +223,8 @@
                                        (tries . < . 32))))))
                      (lambda (x)
                        ;; try again with a new name
+                       ;; TODO: should this use `crypto-random-bytes`, like FreeBSD, per SEI CERT?
+                       ;; See: https://github.com/racket/racket/pull/3870#issuecomment-957779099
                        (loop (- s (random 10))
                              (+ ms (random 10))
                              (add1 tries)))])
