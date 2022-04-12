@@ -16,6 +16,7 @@
 #include <string.h>
 #include <ctype.h>
 #ifdef ZUO_UNIX
+# include <paths.h> /* PATCHED for Guix */
 # include <fcntl.h>
 # include <unistd.h>
 # include <errno.h>
@@ -5949,7 +5950,10 @@ static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
 zuo_t *zuo_process(zuo_t *command_and_args)
 {
   const char *who = "process";
-  zuo_t *command = _zuo_car(command_and_args);
+  /* BEGIN PATCH for Guix */
+  zuo_t *_guix_orig_command = _zuo_car(command_and_args);
+  zuo_t *command;
+  /* END PATCH for Guix */
   zuo_t *args = _zuo_cdr(command_and_args), *rev_args = z.o_null;
   zuo_t *options = z.o_empty_hash, *opt;
   zuo_t *dir, *l, *p_handle, *result;
@@ -5960,7 +5964,19 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   void *env;
   int as_child, exact_cmdline;
 
-  check_path_string(who, command);
+  /* BEGIN PATCH for Guix */
+  check_path_string(who, _guix_orig_command);
+#if defined(_PATH_BSHELL)
+  command =
+    ((z.o_false == zuo_string_eql(_guix_orig_command, zuo_string("/bin/sh")))
+     || (z.o_false == zuo_stat(zuo_string(_PATH_BSHELL), z.o_false, z.o_true)))
+    ? _guix_orig_command
+    : zuo_string(_PATH_BSHELL);
+#else
+  command = _guix_orig_command;
+#endif
+  /* END PATCH for Guix */
+
   for (l = args; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
     zuo_t *a = _zuo_car(l);
     if (a == z.o_null) {
