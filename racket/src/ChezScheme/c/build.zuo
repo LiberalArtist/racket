@@ -273,7 +273,15 @@
                              (string->shell (or lz4-system-lib lz4-lib))
                              (lookup 'LIBS)))]
 
-     [:target ,zlib-lib ,(source-tree (at-source "../zlib"))
+     [:target ,zlib-lib ,(cond
+                           ;; some distributions (e.g. Guix) delete the zlib
+                           ;; directory, in which case `source-tree` would fail
+                           [(stat (at-source "../zlib"))
+                            (source-tree (at-source "../zlib"))]
+                           [zlib-system-lib
+                            '()]
+                           [else
+                            (error "missing zlib directory: consider configuring with \"ZLIB=\"")])
               ,(lambda (path token)
                  (cp* (at-source "../zlib") zlib-dir)
 		 (cond
