@@ -139,19 +139,29 @@
                          vars))
            token))
 
+  (define doc-project-names
+    ;; happily, the name of the subdirectory is the same as
+    ;; value assigned to `x` in the corresponding makefile
+    '("csug" "release_notes"))
+  (define doc-install-dir-keys
+    ;; in parallel to doc-project-names
+    '(InstallCSUG InstallReleaseNotes))
   (define (build-docs token target)
     (check-not-kernel-only)
-    (define (do-doc name)
+    (define (do-doc name install-dir-key)
       (mkdir-p (at-dir name))
       (define mf (~a "m=" m "\n"
                      "srcdir=" (find-relative-path (at-dir name) (at-source name)) "\n"
+                     ;; FIXME: fales if configured path includes "#"
+                     "installdir=" (hash-ref config install-dir-key) "\n"
                      (file->string (at-source (~a "makefiles/Makefile-" name ".in")))))
       (display-to-file mf (at-dir name "Makefile") :truncate)
       (shell/wait (hash-ref config 'MAKE "make")
                   target
                   (hash 'dir (at-dir name))))
-    (do-doc "csug")
-    (do-doc "release_notes"))
+    (map do-doc
+         doc-project-names
+         doc-install-dir-keys))
 
   (define (clean-links dir)
     (for-each (lambda (p)

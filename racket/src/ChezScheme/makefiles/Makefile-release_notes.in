@@ -1,7 +1,6 @@
-# srcdir and m are added before
+# srcdir, installdir, and m are added before
 Scheme=../bin/$m/scheme -b ../boot/$m/petite.boot -b ../boot/$m/scheme.boot
 STEXLIB=$(srcdir)/../stex
-installdir=/tmp/csv9
 INSTALL=$(srcdir)/../makefiles/installsh
 
 # define default document pathname here

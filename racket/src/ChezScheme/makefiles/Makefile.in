@@ -80,7 +80,7 @@ from-orig: $(ZUO)
 docs: build $(ZUO)
 	$(ZUO) $(workarea) docs MAKE="$(MAKE)"
 
-.PHONY: docs-install
+.PHONY: install-docs
 install-docs: build $(ZUO)
 	$(ZUO) $(workarea) install-docs MAKE="$(MAKE)"
 
