@@ -146,6 +146,25 @@
   (define doc-install-dir-keys
     ;; in parallel to doc-project-names
     '(InstallCSUG InstallReleaseNotes))
+  (define (targets-for-doc name install-dir-key)
+    (define mf-in (at-source "makefiles" (~a "Makefile-" name ".in")))
+    (define mf-out (at-dir name "Makefile"))
+    (define name-sym (string->symbol name))
+    (define (run-make target)
+      (check-not-kernel-only)
+      (shell/wait "make" target
+                  (hash 'dir (at-dir name))))
+    `([:target ,mf-in (,mf-out)
+               ,(lambda (path token)
+                  (mkdir-p (at-dir name))
+                  (cp mf-in mf-out))]
+      [:target ,name-sym (,mf-out ,@(source-tree (at-source name)))
+               ,(lambda (token . args)
+                  (run-make ""))]
+      [:target ,(string->symbol (~a "install-" name)) (,name-sym)
+               ,(lambda (token . args)
+                  (run-make "install"))]))
+      
   (define (build-docs token target)
     (check-not-kernel-only)
     (define (do-doc name install-dir-key)
