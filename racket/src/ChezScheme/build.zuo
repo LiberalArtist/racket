@@ -152,9 +152,17 @@
     (define name-sym (string->symbol name))
     (define (run-make target)
       (check-not-kernel-only)
-      (shell/wait "make" target
+      (define srcdir
+        (find-relative-path (at-dir name) (at-source name)))
+      (define installdir
+        (find-relative-path (at-dir name) (hash-ref config install-dir-key)))
+      (shell/wait "make"
+                  (~a "m=" m)
+                  (~a "srcdir=" (string->shell srcdir))
+                  (~a "installdir=" (string->shell installdir))
+                  target
                   (hash 'dir (at-dir name))))
-    `([:target ,mf-in (,mf-out)
+    `([:target ,mf-out (,mf-in)
                ,(lambda (path token)
                   (mkdir-p (at-dir name))
                   (cp mf-in mf-out))]
@@ -164,23 +172,6 @@
       [:target ,(string->symbol (~a "install-" name)) (,name-sym)
                ,(lambda (token . args)
                   (run-make "install"))]))
-      
-  (define (build-docs token target)
-    (check-not-kernel-only)
-    (define (do-doc name install-dir-key)
-      (mkdir-p (at-dir name))
-      (define mf (~a "m=" m "\n"
-                     "srcdir=" (find-relative-path (at-dir name) (at-source name)) "\n"
-                     ;; FIXME: fales if configured path includes "#"
-                     "installdir=" (hash-ref config install-dir-key) "\n"
-                     (file->string (at-source (~a "makefiles/Makefile-" name ".in")))))
-      (display-to-file mf (at-dir name "Makefile") :truncate)
-      (shell/wait (hash-ref config 'MAKE "make")
-                  target
-                  (hash 'dir (at-dir name))))
-    (map do-doc
-         doc-project-names
-         doc-install-dir-keys))
 
   (define (clean-links dir)
     (for-each (lambda (p)
@@ -304,13 +295,13 @@
                    (build (map (lambda (f) (find-target f the-targets)) boot-files)
                           token))]
 
-       [:target docs (build)
-                ,(lambda (token)
-                   (build-docs token ""))]
-
-       [:target install-docs (build)
-                ,(lambda (token)
-                   (build-docs token "install"))]
+       ,@(apply append (map targets-for-doc
+                            doc-project-names
+                            doc-install-dir-keys))
+       [:target docs (csug release_notes)
+                ,void]
+       [:target install-docs (install-csug install-release_notes)
+                ,void]
 
 
        [:target rpm ()
