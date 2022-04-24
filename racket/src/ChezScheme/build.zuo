@@ -140,8 +140,10 @@
            token))
 
   (define stexlib
-    (or (hash-ref vars 'STEXLIB #f)
-        (at-source "stex")))
+    (let ((found (assoc "STEXLIB" (hash-ref (runtime-env) 'env))))
+      (if found
+          (cdr found)
+          (at-source "stex"))))
   (define stex-sources
     (source-tree stexlib))
 
