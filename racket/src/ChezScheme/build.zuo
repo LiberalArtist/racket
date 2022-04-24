@@ -139,6 +139,12 @@
                          vars))
            token))
 
+  (define stexlib
+    (or (hash-ref vars 'STEXLIB #f)
+        (at-source "stex")))
+  (define stex-sources
+    (source-tree stexlib))
+
   (define doc-project-names
     ;; happily, the name of the subdirectory is the same as
     ;; value assigned to `x` in the corresponding makefile
@@ -152,21 +158,23 @@
     (define name-sym (string->symbol name))
     (define (run-make target)
       (check-not-kernel-only)
-      (define srcdir
-        (find-relative-path (at-dir name) (at-source name)))
-      (define installdir
-        (find-relative-path (at-dir name) (hash-ref config install-dir-key)))
+      (define (->rel-shell pth)
+        (string->shell (find-relative-path (at-dir name) pth)))
       (shell/wait "make"
                   (~a "m=" m)
-                  (~a "srcdir=" (string->shell srcdir))
-                  (~a "installdir=" (string->shell installdir))
+                  (~a "srcdir=" (->rel-shell (at-source name)))
+                  (~a "installdir="
+                      (->rel-shell (hash-ref config install-dir-key)))
+                  (~a "STEXLIB=" (->rel-shell stexlib))
                   target
                   (hash 'dir (at-dir name))))
     `([:target ,mf-out (,mf-in)
                ,(lambda (path token)
                   (mkdir-p (at-dir name))
                   (cp mf-in mf-out))]
-      [:target ,name-sym (,mf-out ,@(source-tree (at-source name)))
+      [:target ,name-sym (,mf-out
+                          ,@(source-tree (at-source name))
+                          ,@stex-sources)
                ,(lambda (token . args)
                   (run-make ""))]
       [:target ,(string->symbol (~a "install-" name)) (,name-sym)
