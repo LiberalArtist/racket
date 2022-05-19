@@ -857,6 +857,22 @@ static ptr s_process(char *s, IBOOL stderrp) {
 
     INT tofds[2], fromfds[2], errfds[2];
     struct sigaction act, oint_act;
+    /* BEGIN PATCH for Guix */
+#if defined(GUIX_RKTIO_PATCH_BIN_SH)
+# define GUIX_AS_a_STR_HELPER(x) #x
+# define GUIX_AS_a_STR(x) GUIX_AS_a_STR_HELPER(x)
+    /* A level of indirection makes `#` work as needed: */
+    struct stat guix_stat_buf;
+    char *guix_sh =
+      (0 == stat(GUIX_AS_a_STR(GUIX_RKTIO_PATCH_BIN_SH), &guix_stat_buf))
+      ? GUIX_AS_a_STR(GUIX_RKTIO_PATCH_BIN_SH)
+      : "/bin/sh";
+# undef GUIX_AS_a_STR
+# undef GUIX_AS_a_STR_HELPER
+#else /* GUIX_RKTIO_PATCH_BIN_SH */
+    char *guix_sh = "/bin/sh";
+#endif
+    /* END PATCH for Guix */
 
     if (pipe(tofds)) S_error("process","cannot open pipes");
     if (pipe(fromfds)) {
@@ -882,7 +898,9 @@ static ptr s_process(char *s, IBOOL stderrp) {
         CLOSE(1); if (dup(fromfds[1]) != 1) _exit(1);
         CLOSE(2); if (dup(stderrp ? errfds[1] : 1) != 2) _exit(1);
         {INT i; for (i = 3; i < NOFILE; i++) (void)CLOSE(i);}
-        execl("/bin/sh", "/bin/sh", "-c", s, NULL);
+        /* BEGIN PATCH for Guix */
+        execl(guix_sh, guix_sh, "-c", s, NULL);
+        /* END PATCH for Guix */
         _exit(1) /* only if execl fails */;
         /*NOTREACHED*/
     } else {
