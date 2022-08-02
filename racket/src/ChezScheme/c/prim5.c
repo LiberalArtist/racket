@@ -58,7 +58,7 @@ static void s_showalloc(IBOOL show_dump, const char *outfn);
 static ptr s_system(const char *s);
 static ptr s_process(char *s, IBOOL stderrp);
 static I32 s_chdir(const char *inpath);
-#ifdef GETWD
+#if defined(GETWD) || (defined(__GNU__) && !defined(PATH_MAX)) /* hurd */
 static char *s_getwd(void);
 #endif
 static ptr s_set_code_byte(ptr p, ptr n, ptr x);
@@ -926,6 +926,22 @@ static I32 s_chdir(const char *inpath) {
 #ifdef GETWD
 static char *s_getwd() {
   return GETWD(TO_VOIDP(&BVIT(S_bytevector(PATH_MAX), 0)));
+}
+#elif defined(__GNU__) && !defined(PATH_MAX) /* hurd */
+static char *s_getwd() {
+  char *path;
+  size_t len;
+  ptr bv;
+  path = getcwd(NULL, 0);
+  if (NULL == path) {
+    return NULL;
+  } else {
+    len = strlen(path);
+    bv = S_bytevector(len);
+    memcpy(TO_VOIDP(&BVIT(bv, 0)), path, len);
+    free(path);
+    return TO_VOIDP(&BVIT(bv, 0));
+  }
 }
 #endif /* GETWD */
 
@@ -1817,7 +1833,7 @@ void S_prim5_init(void) {
     Sforeign_symbol("(cs)s_rational", (void *)S_rational);
     Sforeign_symbol("(cs)sub", (void *)S_sub);
     Sforeign_symbol("(cs)rem", (void *)S_rem);
-#ifdef GETWD
+#if defined(GETWD) || (defined(__GNU__) && !defined(PATH_MAX)) /* hurd */
     Sforeign_symbol("(cs)s_getwd", (void *)s_getwd);
 #endif
     Sforeign_symbol("(cs)s_chdir", (void *)s_chdir);
