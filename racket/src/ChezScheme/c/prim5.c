@@ -23,6 +23,10 @@
 #include <ctype.h>
 #include <math.h>
 
+#if defined(__GNU__) && !defined(NOFILE) /* hurd */
+#include <sys/resource.h>
+#endif
+
 /* locally defined functions */
 static INT s_errno(void);
 static IBOOL s_addr_in_heap(uptr x);
@@ -881,7 +885,18 @@ static ptr s_process(char *s, IBOOL stderrp) {
         CLOSE(0); if (dup(tofds[0]) != 0) _exit(1);
         CLOSE(1); if (dup(fromfds[1]) != 1) _exit(1);
         CLOSE(2); if (dup(stderrp ? errfds[1] : 1) != 2) _exit(1);
+#if !defined(NOFILE) && defined(__GNU__) /* hurd */
+        {
+          INT i;
+          struct rlimit rlim;
+          getrlimit(RLIMIT_NOFILE, &rlim);
+          for (i = 3; i < rlim.rlim_cur; i++) {
+            (void)CLOSE(i);
+          }
+        }
+#else
         {INT i; for (i = 3; i < NOFILE; i++) (void)CLOSE(i);}
+#endif
         execl("/bin/sh", "/bin/sh", "-c", s, NULL);
         _exit(1) /* only if execl fails */;
         /*NOTREACHED*/
