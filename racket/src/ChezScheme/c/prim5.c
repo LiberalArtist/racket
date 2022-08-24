@@ -27,6 +27,12 @@
 #include <sys/resource.h>
 #endif
 
+/* BEGIN PATCH for Guix */
+#ifndef WIN32
+# include <paths.h>
+#endif
+/* END PATCH for Guix */
+
 /* locally defined functions */
 static INT s_errno(void);
 static IBOOL s_addr_in_heap(uptr x);
@@ -861,6 +867,17 @@ static ptr s_process(char *s, IBOOL stderrp) {
 
     INT tofds[2], fromfds[2], errfds[2];
     struct sigaction act, oint_act;
+    /* BEGIN PATCH for Guix */
+#if defined(_PATH_BSHELL)
+    struct stat guix_stat_buf;
+    char *guix_sh =
+      (0 == stat(_PATH_BSHELL, &guix_stat_buf))
+      ? _PATH_BSHELL
+      : "/bin/sh";
+#else /* _PATH_BSHELL */
+    char *guix_sh = "/bin/sh";
+#endif
+    /* END PATCH for Guix */
 
     if (pipe(tofds)) S_error("process","cannot open pipes");
     if (pipe(fromfds)) {
@@ -897,7 +914,9 @@ static ptr s_process(char *s, IBOOL stderrp) {
           }
         }
 #endif /* __GNU__ Hurd */
-        execl("/bin/sh", "/bin/sh", "-c", s, NULL);
+        /* BEGIN PATCH for Guix */
+        execl(guix_sh, guix_sh, "-c", s, NULL);
+        /* END PATCH for Guix */
         _exit(1) /* only if execl fails */;
         /*NOTREACHED*/
     } else {
