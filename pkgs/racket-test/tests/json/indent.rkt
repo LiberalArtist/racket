@@ -7,55 +7,44 @@
   (provide indent-test-data/))
 (require 'data)
 
-(module* cli racket
+(module+ cli
   ;; In a shell, do `. alias.sh` in this directory to be able to run `indent-test-data-cli`.
-  (require (submod "..") racket/cmdline)
-  (command-line
-   #:program "indent-test-data-cli"
-   #:usage-help "" "If given no <option>s or only `--redo-python`, equivalent to:"
-   "  $ indent-test-data-cli --validate-all"
-   #:help-labels
-   "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-   "┃   Actions"
-   "┃ First"
-   #:multi [("--add-from-nat" "-n") N "Add <N>th test datum from enumeration"
-            (--add-from-nat N)]
-   #:help-labels
-   "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-   "┃ Second"
-   #:once-each [("--add-random" "-r") count "Add <count> additional test data, chosen at random"
-                (--add-random count)]
-   ;; --list ?
-   #:help-labels
-   "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-   "┃ Third"
-   #:once-each [("--validate-all" "-a") ("Validate all previously added test data"
-                                         "“Validating” does NOT test the `json` library:"
-                                         "It instead tests the INPUT to those tests")
-                (--validate-all #t)]
-   #:multi [("--validate" "-v") N ("Validate <N>th previously added test datum"
-                                   "(If combined with `--validate-all`, has no additional effect)")
-            (--validate N)]
-   #:help-labels
-   "    ──────────────────────────────────────────────"
-   #:once-each [("--redo-python" "-p" ) "When validating, replace `python.json` files"
-                (--redo-python #t)]
-   #:help-labels
-   "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-   #:args ()
-   (for-each add-from-nat (--add-from-nat))
-   (when (--add-random)
-     (error "--add-random" (--add-random)))
-   (cond
-     [(or (--validate-all)
-          (and (null? (--validate))
-               (null? (--add-from-nat))
-               (not (--add-random))))
-      (error "--validate-all")]
-     [else
-      (validate-list #:redo-python? (--redo-python) (--validate))])
-   (displayln "The end.")
-   (exit 0)))
+  (module* main #f
+    (require racket/cmdline)
+    (command-line
+     #:program "indent-test-data-cli"
+     #:usage-help "" "If given no <option>s or only `--redo-python`, equivalent to:"
+     "  $ indent-test-data-cli --validate-all [ --redo-python ]"
+     #:help-labels
+     "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+     "┃   Actions"
+     "┃ First"
+     #:multi [("--add-from-nat" "-n") N "Add <N>th test datum from enumeration."
+              (--add-from-nat N)]
+     #:help-labels
+     "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+     "┃ Second"
+     #:once-each [("--add-random" "-r") count "Add <count> additional test data, chosen at random."
+                  (--add-random count)]
+     #:help-labels
+     "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+     "┃ Third"
+     #:once-each [("--validate-all" "-a") ("Validate all previously added test data."
+                                           "“Validating” does NOT test the `json` library:"
+                                           "It instead tests the INPUT to those tests.")
+                  (--validate-all #t)]
+     #:multi [("--validate" "-v") N ("Validate <N>th previously added test datum."
+                                     "(If combined with `--validate-all`, has no additional effect.)")
+              (--validate N)]
+     #:help-labels
+     "    ──────────────────────────────────────────────"
+     #:once-each [("--redo-python" "-p" ) "When validating, replace `python.json` files."
+                  (--redo-python #t)]
+     #:help-labels
+     "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+     #:args ()
+     (indent-test-data-cli)
+     (exit 0))))
 
 (require "../../../../racket/collects/json/main.rkt")
 
@@ -246,30 +235,111 @@
 (void
  test-datum/e compound-jsobject/e portable-indent/e
  in-indent-order-cycle random-element to-nat from-nat)
+#|
 (define (make-flag-parameter name default [check #f])
   (define (guard arg)
-    (define n (string->number arg))
-    (unless (check n)
-      (raise-arguments-error 'indent-test-data-cli
-                             "bad argument to switch"
-                             "switch" name
-                             "expected" check
-                             "given" (unquoted-printing-string arg)))
+    (let* ([arg (cond
+                  [(string? arg)
+                   (define n (string->number arg))
+                   (unless (check n)
+                     (raise-arguments-error 'indent-test-data-cli
+                                            "bad argument to switch"
+                                            "switch" name
+                                            "expected" check
+                                            "given" (unquoted-printing-string arg)))
+                   n]
+                  [else
+                   arg])]
     (if (null? default)
         (cons n (this))
         n))
   (define this
     (make-parameter default (and check guard) name))
   this)
-(define-syntax-parse-rule (define-flag-parameters (~seq (~optional (~and #:multi multi))
-                                                        (~or* name:id [name:id check:expr])) ...)
-  (begin (define name (make-flag-parameter 'name (~? (and 'multi '()) #f) (~? check))) ...))
-(define-flag-parameters
-  #:multi [--add-from-nat natural-number/c]
-  [--add-random exact-positive-integer?]
-  #:multi [--validate natural-number/c]
-  --validate-all
-  --redo-python)
+|#(require (for-syntax racket/syntax))
+(begin-for-syntax
+  (define-splicing-syntax-class flag-formal
+    #:description "flag argument clause"
+    #:attributes [kw name init-expr fun-arg/c definitions]
+    (pattern (~seq (~describe "function formal"
+                              (~seq kw:keyword
+                                    (~or* (~describe "argument name"
+                                                     name:id)
+                                          (~describe "identifier with initializer"
+                                                     [name:id custom-init-expr:expr]))))
+                                                      
+                   (~describe "parameter description"
+                              (~seq 
+                               --name:id
+                               (~optional (~seq (~optional (~and #:multi multi?))
+                                                (~var cli-guard
+                                                      (expr/c #'flat-contract?
+                                                              #:name "cli contract expression")))))))
+      #:with ([in/c:id in/c-expr]
+              [(~and out/c:id fun-arg/c)
+               out/c-expr])
+      (for/list ([io '(in out)]
+                 [mk (list #'flag-parameter-in/c #'flag-parameter-out/c)])
+        (list (format-id #'foo "~a/~a/c" #'--name io)
+              #`(#,mk (~? cli-guard.c #f) (~? (~@ #:multi? 'multi?)))))
+      #:with (~var param-expr (expr/c #'(parameter/c in/c out/c)
+                                      #:name "flag parameter"))
+      (quasisyntax/loc #'--name
+        (make-flag-parameter '--name (~? (and 'multi? '()) #f) (~? cli-guard.c #f)))
+      #:attr init-expr #`(~? custom-init-expr (--name))
+      #:attr definitions #`(begin
+                             (define in/c in/c-expr)
+                             (define out/c out/c-expr)
+                             (define --name 'param-expr.c)))))
+
+(define (flag-parameter-in/c cli-guard/c #:multi? [multi? #f])
+  (if cli-guard/c
+      (or/c string? cli-guard/c (if multi? null? #f)) ; avoid confusion with and/c
+      (not/c string?)))
+(define (flag-parameter-out/c cli-guard/c #:multi? [multi? #f])
+  (if cli-guard/c
+      (if multi?
+          (listof cli-guard/c)
+          (or/c #f cli-guard/c))
+      boolean?))
+(define make-flag-parameter error)
+(define-simple-macro (define-main (~describe "function header"
+                                             (name:id arg:flag-formal ...))
+                       body:expr ...+)
+  #:with (~var lambda-expr (expr/c #'(->* [] [(~@ arg.kw arg.fun-arg/c) ...] any)))
+  (quasisyntax/loc this-syntax
+    (λ ({~@ arg.kw [arg.name arg.init-expr]} ...)
+      body ...))
+  (begin arg.definitions ...
+         (define name lambda-expr.c)))
+           
+                       
+(define-main (indent-test-data-cli
+              #:add-from-nat to-add --add-from-nat #:multi natural-number/c
+              #:add-random num-random-to-add --add-random exact-positive-integer?
+              #:redo-python? redo-python? --redo-python
+              #:validate to-validate --validate #:multi natural-number/c  
+              #:validate-all? [validate-all? (or (--validate-all)
+                                                 (and (null? to-validate)
+                                                      (null? to-add)
+                                                      (not num-random-to-add)))]
+              --validate-all)
+  (for-each add-from-nat to-add)
+  (when num-random-to-add
+    (error "--add-random" num-random-to-add))
+  (cond
+    [(or validate-all?
+         (and (null? to-validate)
+              (null? to-add)
+              (not num-random-to-add)))
+     (error "--validate-all" redo-python?)]
+    [else
+     (validate-list #:redo-python? redo-python? to-validate)])
+  (displayln "The end."))
+
+
+
+
 
 
 
