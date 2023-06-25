@@ -12,7 +12,8 @@
   (require (submod "..") racket/cmdline)
   (command-line
    #:program "indent-test-data-cli"
-   #:usage-help "" "If no <option> is given, equivalent to:" "  $ indent-test-data-cli --validata-all"
+   #:usage-help "" "If given no <option>s or only `--redo-python`, equivalent to:"
+   "  $ indent-test-data-cli --validate-all"
    #:help-labels
    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
    "┃   Actions"
@@ -24,6 +25,7 @@
    "┃ Second"
    #:once-each [("--add-random" "-r") count "Add <count> additional test data, chosen at random"
                 (--add-random count)]
+   ;; --list ?
    #:help-labels
    "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
    "┃ Third"
@@ -41,7 +43,18 @@
    #:help-labels
    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
    #:args ()
-   (displayln "the end")
+   (for-each add-from-nat (--add-from-nat))
+   (when (--add-random)
+     (error "--add-random" (--add-random)))
+   (cond
+     [(or (--validate-all)
+          (and (null? (--validate))
+               (null? (--add-from-nat))
+               (not (--add-random))))
+      (error "--validate-all")]
+     [else
+      (validate-list #:redo-python? (--redo-python) (--validate))])
+   (displayln "The end.")
    (exit 0)))
 
 (require "../../../../racket/collects/json/main.rkt")
@@ -261,7 +274,7 @@
 
 
 (define (dir-for-nat n)
-  (build-path indent-test-data/ (number->string n) 'same))
+  (build-path indent-test-data/ (number->string n)))
 
 (define (add-from-nat which)
   (define datum
@@ -296,10 +309,13 @@
   (check-pred (λ (x)
                 (equal? (file->string (build-path dir "node.json")) (file->string x)))
               (build-path dir "python.json"))
-  (displayln "ok")
+  (displayln "TODO: return value")
   #t)
 
-
-
-
-
+(define (validate-list nats #:redo-python? [redo-python? #f])
+  (define problems
+    (filter (λ (which)
+              (validate which #:redo-python? redo-python?))
+            nats))
+  (unless (null? problems)
+    (error "validate-list" problems)))
