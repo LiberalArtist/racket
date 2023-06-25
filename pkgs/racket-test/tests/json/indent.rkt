@@ -1,33 +1,50 @@
 #lang at-exp racket ;/base
 
-(module* cli racket
-  ;; racket -e- "(require (submod \"indent.rkt\" cli))" <...>
-  (require (submod "..") racket/cmdline)
-  (define (do-flag f c s)
-    (define n (string->number s)) 
-    (unless (c n) (error 'indent-test-data-cli "bad flag argument\n  expected: ~e\n  given: ~a" c s))
-    (f n)
-    (exit 0))
-  (command-line
-   #:program "indent-test-data-cli"
-   #:once-any
-   ["--generate-random" how-many "help"
-    (do-flag exit exact-positive-integer? how-many)]
-   ["--generate-from-nat" natural-number "help"
-    (do-flag generate-from-nat natural-number/c natural-number)]
-   ["--validate" which "help"
-    (do-flag exit natural-number/c which)]
-   ["--validate-all" "help"
-    (exit)]
-   #:args ()
-   (error 'indent-test-data-cli "missing required command-line flag")))
 (module data racket/base
   (require racket/runtime-path)
   (define-runtime-path indent-test-data/
     "indent-test-data/")
   (provide indent-test-data/))
-(require 'data
-         "../../../../racket/collects/json/main.rkt")
+(require 'data)
+
+(module* cli racket
+  ;; In a shell, do `. alias.sh` in this directory to be able to run `indent-test-data-cli`.
+  (require (submod "..") racket/cmdline)
+  (command-line
+   #:program "indent-test-data-cli"
+   #:usage-help "" "If no <option> is given, equivalent to:" "  $ indent-test-data-cli --validata-all"
+   #:help-labels
+   "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+   "┃   Actions"
+   "┃ First"
+   #:multi [("--add-from-nat" "-n") N "Add <N>th test datum from enumeration"
+            (--add-from-nat N)]
+   #:help-labels
+   "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+   "┃ Second"
+   #:once-each [("--add-random" "-r") count "Add <count> additional test data, chosen at random"
+                (--add-random count)]
+   #:help-labels
+   "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+   "┃ Third"
+   #:once-each [("--validate-all" "-a") ("Validate all previously added test data"
+                                         "“Validating” does NOT test the `json` library:"
+                                         "It instead tests the INPUT to those tests")
+                (--validate-all #t)]
+   #:multi [("--validate" "-v") N ("Validate <N>th previously added test datum"
+                                   "(If combined with `--validate-all`, has no additional effect)")
+            (--validate N)]
+   #:help-labels
+   "    ──────────────────────────────────────────────"
+   #:once-each [("--redo-python" "-p" ) "When validating, replace `python.json` files"
+                (--redo-python #t)]
+   #:help-labels
+   "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+   #:args ()
+   (displayln "the end")
+   (exit 0)))
+
+(require "../../../../racket/collects/json/main.rkt")
 
 
 
@@ -199,7 +216,7 @@
   (define-syntax-rule (define/provide id ...)
     (begin (provide id ...)
            (define (get sym)
-             (if (module-declared? enum-mpi)
+             (if (module-declared? enum-mpi 'load)
                  (dynamic-require enum-mpi sym)
                  (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
            (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
@@ -208,17 +225,49 @@
     in-indent-order-cycle random-element to-nat from-nat))
 
 
-(require 'dynamic-enum 'system)
+(require 'dynamic-enum
+         'system
+         rackunit
+         syntax/parse/define)
 (provide (all-defined-out))
-(begin;void
+(void
  test-datum/e compound-jsobject/e portable-indent/e
  in-indent-order-cycle random-element to-nat from-nat)
+(define (make-flag-parameter name default [check #f])
+  (define (guard arg)
+    (define n (string->number arg))
+    (unless (check n)
+      (raise-arguments-error 'indent-test-data-cli
+                             "bad argument to switch"
+                             "switch" name
+                             "expected" check
+                             "given" (unquoted-printing-string arg)))
+    (if (null? default)
+        (cons n (this))
+        n))
+  (define this
+    (make-parameter default (and check guard) name))
+  this)
+(define-syntax-parse-rule (define-flag-parameters (~seq (~optional (~and #:multi multi))
+                                                        (~or* name:id [name:id check:expr])) ...)
+  (begin (define name (make-flag-parameter 'name (~? (and 'multi '()) #f) (~? check))) ...))
+(define-flag-parameters
+  #:multi [--add-from-nat natural-number/c]
+  [--add-random exact-positive-integer?]
+  #:multi [--validate natural-number/c]
+  --validate-all
+  --redo-python)
 
-(define (generate-from-nat which)
+
+
+(define (dir-for-nat n)
+  (build-path indent-test-data/ (number->string n) 'same))
+
+(define (add-from-nat which)
   (define datum
     (from-nat test-datum/e which))
   (define dir
-    (build-path indent-test-data/ (number->string which)))
+    (dir-for-nat which))
   (make-directory dir)
   (call-with-output-file* (build-path dir "datum.rktd")
     (λ (out)
@@ -228,7 +277,29 @@
       (apply node-write-json datum)))
   (validate which))
 
+(define (validate which #:redo-python? [redo-python? #f])
+  (define datum
+    (from-nat test-datum/e which))
+  (define dir
+    (dir-for-nat which))
+  (check-pred (λ (x)
+                (equal? datum (file->value x)))
+              (build-path dir "datum.rktd"))
+  (check-pred (λ (x)
+                (equal? datum (string->jsexpr (file->string x))))
+              (build-path dir "node.json"))
+  (when (or redo-python? (not (file-exists? (build-path dir "python.json"))))
+    (with-output-to-file (build-path dir "python.json")
+      #:exists 'truncate/replace
+      (λ ()
+        (apply node-write-json datum))))
+  (check-pred (λ (x)
+                (equal? (file->string (build-path dir "node.json")) (file->string x)))
+              (build-path dir "python.json"))
+  (displayln "ok")
+  #t)
 
-(define validate void)
+
+
 
 
