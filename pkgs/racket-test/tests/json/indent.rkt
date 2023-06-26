@@ -5,10 +5,15 @@
   (define-runtime-path indent-test-data/
     "indent-test-data/")
   (provide indent-test-data/))
-(require 'data)
+(require 'data
+         "../../../../racket/collects/json/main.rkt")
+
+;;
+;;    WRITE TESTS HERE
+;;
 
 (module+ cli
-  ;; In a shell, do `. alias.sh` in this directory to be able to run `indent-test-data-cli`.
+  ;; In a shell, source `alias.sh` in this directory to be able to run `indent-test-data-cli`.
   (module* main #f
     (require racket/cmdline)
     (command-line
@@ -33,8 +38,10 @@
                                            "“Validating” does NOT test the `json` library:"
                                            "It instead tests the INPUT to those tests.")
                   (--validate-all #t)]
-     #:multi [("--validate" "-v") N ("Validate <N>th previously added test datum."
-                                     "(If combined with `--validate-all`, has no additional effect.)")
+     #:multi [("--validate" "-v")
+              N ("Validate <N>th previously added test datum."
+                 "(If combined with `--validate-all`, has no additional effect.)"
+                 "Data added by `--add-from-nat` and `--add-random` are always validated.")
               (--validate N)]
      #:help-labels
      "    ──────────────────────────────────────────────"
@@ -46,7 +53,6 @@
      (indent-test-data-cli)
      (exit 0))))
 
-(require "../../../../racket/collects/json/main.rkt")
 
 
 
@@ -147,6 +153,30 @@
   (define test-datum/e
     (list/e portable-indent/e
             compound-jsobject/e)))
+(module dynamic-enum racket
+  (require syntax/modresolve
+           (for-syntax racket/base syntax/transformer))
+  (define enum-mpi
+    (module-path-index-join '(submod ".." enum) (variable-reference->module-path-index
+                                                 (#%variable-reference))))
+  (define-syntax-rule (define/provide id ...)
+    (begin (provide id ...)
+           (define (get sym)
+             (if (module-declared? enum-mpi 'load)
+                 (dynamic-require enum-mpi sym)
+                 (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
+           (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
+  (define/provide
+    test-datum/e compound-jsobject/e portable-indent/e
+    in-indent-order-cycle random-element to-nat from-nat))
+
+
+
+
+
+
+
+
 (module system racket
   (provide node-write-json
            python-write-json)
@@ -207,56 +237,77 @@
  @""       ensure_ascii=False)
 }
              json)))))
-(module dynamic-enum racket
-  (require racket/runtime-path
-           syntax/modresolve
-           (for-syntax syntax/transformer))
-  (define-runtime-module-path-index here-mpi
-    '(submod "."))
-  (define enum-mpi
-    (module-path-index-join '(submod ".." enum) here-mpi))
-  (define-syntax-rule (define/provide id ...)
-    (begin (provide id ...)
-           (define (get sym)
-             (if (module-declared? enum-mpi 'load)
-                 (dynamic-require enum-mpi sym)
-                 (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
-           (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
-  (define/provide
-    test-datum/e compound-jsobject/e portable-indent/e
-    in-indent-order-cycle random-element to-nat from-nat))
 
 
-(require 'dynamic-enum
-         'system
-         rackunit
-         syntax/parse/define)
-(provide (all-defined-out))
-(void
- test-datum/e compound-jsobject/e portable-indent/e
- in-indent-order-cycle random-element to-nat from-nat)
-#|
-(define (make-flag-parameter name default [check #f])
-  (define (guard arg)
-    (let* ([arg (cond
-                  [(string? arg)
-                   (define n (string->number arg))
-                   (unless (check n)
-                     (raise-arguments-error 'indent-test-data-cli
-                                            "bad argument to switch"
-                                            "switch" name
-                                            "expected" check
-                                            "given" (unquoted-printing-string arg)))
-                   n]
-                  [else
-                   arg])]
-    (if (null? default)
-        (cons n (this))
-        n))
-  (define this
-    (make-parameter default (and check guard) name))
-  this)
-|#(require (for-syntax racket/syntax))
+
+
+
+(module+ cli
+
+
+
+  
+
+  (define not-string/c
+  (let ()
+    (define (not-string/c x)
+      (or (not (string? x))
+          (λ (blame)
+            (raise-blame-error
+             blame x
+             `(";\n boolean switches do not parse argument strings"
+               expected: "(not/c string?)" given: "~e")
+             x))))
+    (flat-contract-with-explanation not-string/c)))
+
+(define bool-flag-parameter/c
+  (parameter/c not-string/c boolean?))
+  
+(define (nat-flag-parameter/c parsed-cli-arg/c multi?)
+  (parameter/c (or/c string?
+                     parsed-cli-arg/c
+                     ; avoid confusion with and/c
+                     (if multi? (listof parsed-cli-arg/c) #f))
+               (if multi?
+                   (listof parsed-cli-arg/c)
+                   (or/c #f parsed-cli-arg/c))))
+  
+(define make-flag-parameter
+  (case-lambda
+    [(name) ; This is a boolean switch: nothing to parse.
+     (make-parameter #f (λ (x) (and x #t)) name)]
+    [(name parsed-arg-ok? init)
+     (define (parse-string str)
+       (define n (string->number str))
+       (unless (parsed-arg-ok? n)
+         (raise-arguments-error 'indent-test-data-cli
+                                "bad argument to switch"
+                                "switch" name
+                                "expected" check
+                                "given" (unquoted-printing-string str)))
+       n)
+     (define (parse-new x)
+       (if (string? x)
+           (parse-string x)
+           x))
+     (define guard
+       (cond
+         [(null? init) ; List parameter: replace list or cons on new value.
+          (λ (x)      #; (this atom) #|is short for|# #;(this (cons (parse-new atom) (this)))
+            (if (list? x)
+                x
+                (cons (parse-new x) (this))))]
+         [else
+          parse-new]))
+     (define this
+       (make-parameter init guard name))
+     this]))
+
+
+
+
+
+  
 (begin-for-syntax
   (define-splicing-syntax-class flag-formal
     #:description "flag argument clause"
@@ -272,37 +323,32 @@
                               (~seq 
                                --name:id
                                (~optional (~seq (~optional (~and #:multi multi?))
-                                                (~var cli-guard
+                                                (~var parsed-cli-arg/c-expr
                                                       (expr/c #'flat-contract?
                                                               #:name "cli contract expression")))))))
-      #:with ([in/c:id in/c-expr]
-              [(~and out/c:id fun-arg/c)
-               out/c-expr])
-      (for/list ([io '(in out)]
-                 [mk (list #'flag-parameter-in/c #'flag-parameter-out/c)])
-        (list (format-id #'foo "~a/~a/c" #'--name io)
-              #`(#,mk (~? cli-guard.c #f) (~? (~@ #:multi? 'multi?)))))
-      #:with (~var param-expr (expr/c #'(parameter/c in/c out/c)
+      #:attr parsed-cli-arg/c (and (attribute parsed-cli-arg/c-expr.c)
+                                   (format-id #'foo "~a/parsed/c" #'--name))
+      #:attr fun-arg/c #`(~? (~? (and 'multi? (listof parsed-cli-arg/c))
+                                 (or/c #f parsed-cli-arg/c))
+                             not-string/c)
+      #:with (~var param-expr (expr/c #'(~? (nat-flag-parameter/c parsed-cli-arg/c (~? 'multi? #f))
+                                            bool-flag-parameter/c)
                                       #:name "flag parameter"))
       (quasisyntax/loc #'--name
-        (make-flag-parameter '--name (~? (and 'multi? '()) #f) (~? cli-guard.c #f)))
+        (make-flag-parameter '--name
+                             (~? (~@ parsed-cli-arg/c (~? (and 'multi? null) #f)))))
       #:attr init-expr #`(~? custom-init-expr (--name))
       #:attr definitions #`(begin
-                             (define in/c in/c-expr)
-                             (define out/c out/c-expr)
+                             (~? (define parsed-cli-arg/c parsed-cli-arg/c-expr.c))
                              (define --name 'param-expr.c)))))
 
-(define (flag-parameter-in/c cli-guard/c #:multi? [multi? #f])
-  (if cli-guard/c
-      (or/c string? cli-guard/c (if multi? null? #f)) ; avoid confusion with and/c
-      (not/c string?)))
-(define (flag-parameter-out/c cli-guard/c #:multi? [multi? #f])
-  (if cli-guard/c
-      (if multi?
-          (listof cli-guard/c)
-          (or/c #f cli-guard/c))
-      boolean?))
-(define make-flag-parameter error)
+
+
+
+
+
+  
+
 (define-simple-macro (define-main (~describe "function header"
                                              (name:id arg:flag-formal ...))
                        body:expr ...+)
@@ -335,7 +381,49 @@
      (error "--validate-all" redo-python?)]
     [else
      (validate-list #:redo-python? redo-python? to-validate)])
-  (displayln "The end."))
+  (displayln "The end.")))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
