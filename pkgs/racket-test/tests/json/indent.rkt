@@ -108,7 +108,7 @@
 
   (require (for-syntax racket/syntax)
            (submod ".." dynamic-enum)
-           (submod ".." #;generate)
+           (submod ".." #;generate-and-validate)
            syntax/parse/define)
 
 
@@ -488,120 +488,77 @@
 
 (require 'dynamic-enum
          'system
-         (for-syntax (for-syntax racket/base
-                                 racket/syntax
-                                 racket/list
-                                 syntax/parse)
-                     syntax/parse)
          rackunit)
 (void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
 
-(define (dir-from-nat n)
-  (build-path indent-test-data/ (number->string n)))
 (define (datum-from-nat n)
   (from-nat test-datum/e n))
+(define (dir-for-nat n)
+  (build-path indent-test-data/ (number->string n)))
 
-(define-syntax define-from-nat
-  (syntax-parser
-    [(_ (~alt (~once (~and nat-expr (~datum nat)))
-              (~optional (~and dir-str (~datum dir-str)))
-              (~describe "file name"
-                         (~and file-name
-                               (~or* (~datum datum.rktd)
-                                     (~datum node.json)
-                                     (~datum python.json)
-                                     (~datum args.node.rktd)
-                                     (~datum args.python.json))
-                               (~bind 
-(define-syntax define-from-nat/recur
+(define (pretty-write-to-file x pth)
+  (call-with-output-file* pth
+    (λ (out)
+      (pretty-write x out))))
 
-(begin-for-syntax
-  (define-syntax-class id-with-str
-    #:description #f
-    #:attributes [str]
-    (pattern name:id
-      #:attr str (datum->syntax #'name (symbol->string (syntax-e id)))))
-  (define-syntax ~symbolic
-    (pattern-expander
-     (syntax-parser
-       [(_ name:id)
-        #`(~and (~var name id-with-str) (~datum name))]
-       [(_ #:optional name:id ... #:too-many too-mant:string)
-        #:fail-when (check-duplicates (syntax->list #'(name ...))
-                                      eq? #:key syntax-e)
-        "duplicate symbolic identifier"
-        #`(~alt (~optional
-
-                     (symbol->string (syntax-e id))
-  (define-simple-macro (define-symbolic-identifiers-syntax-class name:id
-                         pre ...
-                         #: (~literal pattern) name:id [datum:id ...]
-                         post ...)
-    (define-syntax-class name
-      pre ...
-      (pattern (~and name (or* (~datum datum) ...)|#
-#;
-(begin-for-syntax
-  (define-syntax-class known-file
-    (pattern name:id
-      )))
+(define-values [node-write-for-nat
+                python-write-for-nat]
+  (let ()
+    (define (rm-f pth)
+      (delete-directory/files pth #:must-exist? #f))
+    (define (run-writer name proc nat #:exists [exists 'error])
+      (parameterize ([current-directory (dir-for-nat nat)])
+        (define json-pth (string-append name ".json"))
+        (define rktd-pth (string-append "args." name ".rktd"))
+        (when (eq? exists 'redo)
+          (for-each rm-f (list json-pth rktd-pth)))
+        (unless (and (eq? exists 'ignore)
+                     (file-exists? json-pth))
+          (rm-f rktd-pth)
+          (pretty-write-to-file (with-output-to-file json-pth
+                                  (λ ()
+                                    (apply proc (datum-from-nat nat))))
+                                rktd-pth))))
+    (define (node-write-for-nat nat)
+      (run-writer "node" node-write-json nat))
+    (define (python-write-for-nat nat #:redo-python? [redo-python? #f])
+      (run-writer "python" python-write-json nat #:exists (if redo-python?
+                                                              'redo
+                                                              'ignore)))
+    (values node-write-for-nat
+            python-write-for-nat)))
 
 (define (add-from-nat nat)
-  (define datum (datum-from-nat nat))
-  (define dir (dir-from-nat nat))
+  (define dir (dir-for-nat nat))
   (make-directory dir)
-  (call-with-output-file* (build-path dir "datum.rktd")
-    (λ (out)
-      (pretty-write datum out)))
-  (with-output-to-file (build-path dir "node.json")
-    (λ ()
-      (apply node-write-json datum)))
+  (pretty-write-to-file (datum-from-nat nat)
+                        (build-path dir "datum.rktd"))
+  (node-write-for-nat nat)
   (validate nat))
 
+(define (file->jsexpr pth)
+  (string->jsexpr ; ensure whole file is consumed
+   (file->string pth)))
+    
 (define (validate nat #:redo-python? [redo-python? #f])
-  (define datum
-    (from-nat test-datum/e nat))
-  (define dir
-    (dir-from-nat nat))
-  (check-pred (λ (x)
-                (equal? datum (file->value x)))
-              (build-path dir "datum.rktd"))
-  (check-pred (λ (x)
-                (equal? datum (string->jsexpr (file->string x))))
-              (build-path dir "node.json"))
-  (when (or redo-python? (not (file-exists? (build-path dir "python.json"))))
-    (with-output-to-file (build-path dir "python.json")
-      #:exists 'truncate/replace
-      (λ ()
-        (apply node-write-json datum))))
-  (check-pred (λ (x)
-                (equal? (file->string (build-path dir "node.json")) (file->string x)))
-              (build-path dir "python.json"))
-  (displayln "TODO: return value")
-  #t)
-
+  (parameterize ([current-directory (dir-for-nat nat)])
+    (python-write-for-nat nat #:redo-python? redo-python?)
+    (match-define (list indent jsexpr) (datum-from-nat nat))
+    (test-case
+     (string-append (number->string nat) "/")
+     (test-equal? "datum.rktd contains correct value"
+                  (file->value "datum.rktd")
+                  jsexpr)
+     (test-equal? "node.json contains correct value"
+                  (file->jsexpr "node.json")
+                  jsexpr)
+     (test-equal? "python.json is identical to node.json"
+                  (file->string "python.json")
+                  (file->string "node.json")))))
+  
 (define (validate-list nats #:redo-python? [redo-python? #f])
-  (define problems
-    (filter (λ (which)
-              (validate which #:redo-python? redo-python?))
+  (for-each (λ (n)
+              (validate n #:redo-python? redo-python?))
             nats))
-  (unless (null? problems)
-    (error "validate-list" problems)))
-
-
-
-
-
-
-
-
-
-
-
-
-(node-write-json #\tab null)
-
-
-
 
 
