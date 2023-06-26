@@ -12,7 +12,7 @@
 ;;    WRITE TESTS HERE
 ;;
 
-(module+ cli
+(module* cli racket
   ;; In a shell, source `alias.sh` in this directory to be able to run `indent-test-data-cli`.
   (module* main #f
     (require racket/cmdline)
@@ -51,36 +51,222 @@
      "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
      #:args ()
      (indent-test-data-cli)
-     (exit 0))))
+     (exit 0)))
+
+
+  ;
+  ;
+  ;
+  ;
+  ;
+  ;                                                        ;;
+  ;   ;;;;                                                 ;;
+  ;    ;;             ;                                    ;;
+  ;    ;;             ;                                    ;;
+  ;    ;;   ;; ;;;  ;;;;;   ;;;;    ;; ;  ;; ;;;    ;;;;   ;;   ;;;;
+  ;    ;;   ;;;  ;    ;    ;;   ;   ;;;   ;;;  ;   ;;  ;;  ;;  ;   ;
+  ;    ;;   ;;   ;;   ;    ;    ;;  ;;    ;;   ;;       ;  ;;  ;
+  ;    ;;   ;;   ;;   ;    ;    ;;  ;;    ;;   ;;       ;  ;;  ;;
+  ;    ;;   ;;   ;;   ;    ;;;;;;;  ;;    ;;   ;;   ;;;;;  ;;   ;;;;
+  ;    ;;   ;;   ;;   ;    ;        ;;    ;;   ;;  ;    ;  ;;      ;;
+  ;    ;;   ;;   ;;   ;    ;        ;;    ;;   ;;  ;    ;  ;;      ;;
+  ;    ;;   ;;   ;;   ;    ;;   ;   ;;    ;;   ;;  ;  ;;;  ;;  ;   ;;
+  ;   ;;;;  ;;   ;;   ;;;   ;;;;    ;;    ;;   ;;  ;;;; ;; ;;;  ;;;;
+  ;
+  ;
+  ;
+  ;
+  ;
 
 
 
 
 
+  ;
+  ;
+  ;
+  ;
+  ;
+  ;
+  ;   ;;;;  ;;     ;; ;;;;;;;;; ;;;;;;;  ;;;;;;;   ;;     ;;     ;;     ;;       ;;;;;
+  ;    ;;   ;;;    ;;     ;     ;;       ;;    ;;  ;;;    ;;     ;;     ;;      ;;   ;;
+  ;    ;;   ;;;    ;;     ;     ;;       ;;    ;;  ;;;    ;;    ;;;;    ;;      ;
+  ;    ;;   ;; ;   ;;     ;     ;;       ;;    ;;  ;; ;   ;;    ;  ;    ;;      ;
+  ;    ;;   ;; ;   ;;     ;     ;;       ;;    ;;  ;; ;   ;;    ;  ;    ;;      ;;
+  ;    ;;   ;;  ;  ;;     ;     ;;;;;;;  ;;    ;;  ;;  ;  ;;   ;;  ;;   ;;       ;;;;
+  ;    ;;   ;;  ;  ;;     ;     ;;       ;;;;;;;   ;;  ;  ;;   ;    ;   ;;          ;;;
+  ;    ;;   ;;   ; ;;     ;     ;;       ;;   ;    ;;   ; ;;   ;;;;;;   ;;            ;
+  ;    ;;   ;;   ; ;;     ;     ;;       ;;   ;    ;;   ; ;;  ;;    ;;  ;;            ;
+  ;    ;;   ;;    ;;;     ;     ;;       ;;   ;;   ;;    ;;;  ;      ;  ;;      ;     ;
+  ;    ;;   ;;    ;;;     ;     ;;       ;;    ;   ;;    ;;;  ;      ;  ;;      ;;   ;;
+  ;   ;;;;  ;;     ;;     ;     ;;;;;;;  ;;    ;;  ;;     ;;  ;      ;; ;;;;;;   ;;;;;
+  ;
+  ;
+  ;
+  ;
+  ;
+
+  (require (for-syntax racket/syntax)
+           (submod ".." dynamic-enum)
+           (submod ".." #;generate)
+           syntax/parse/define)
 
 
 
 
+  (define not-string/c
+    (let ()
+      (define (not-string/c x)
+        (or (not (string? x))
+            (λ (blame)
+              (raise-blame-error
+               blame x
+               `(";\n boolean switches do not parse argument strings"
+                 expected: "(not/c string?)" given: "~e")
+               x))))
+      (flat-contract-with-explanation not-string/c)))
+
+  (define bool-flag-parameter/c
+    (parameter/c not-string/c boolean?))
+
+  (define (nat-flag-parameter/c parsed-cli-arg/c multi?)
+    (parameter/c (or/c string?
+                       parsed-cli-arg/c
+                       ; avoid confusion with and/c
+                       (if multi? (listof parsed-cli-arg/c) #f))
+                 (if multi?
+                     (listof parsed-cli-arg/c)
+                     (or/c #f parsed-cli-arg/c))))
+
+  (define make-flag-parameter
+    (case-lambda
+      [(name) ; This is a boolean switch: nothing to parse.
+       (make-parameter #f (λ (x) (and x #t)) name)]
+      [(name parsed-arg-ok? init)
+       (define (parse-string str)
+         (define n (string->number str))
+         (unless (parsed-arg-ok? n)
+           (raise-arguments-error 'indent-test-data-cli
+                                  "bad argument to switch"
+                                  "switch" name
+                                  "expected" parsed-arg-ok?
+                                  "given" (unquoted-printing-string str)))
+         n)
+       (define (parse-new x)
+         (if (string? x)
+             (parse-string x)
+             x))
+       (define guard
+         (cond
+           [(null? init) ; List parameter: replace list or cons on new value.
+            (λ (x)      #; (this atom) #|is short for|# #;(this (cons (parse-new atom) (this)))
+              (if (list? x)
+                  x
+                  (cons (parse-new x) (this))))]
+           [else
+            parse-new]))
+       (define this
+         (make-parameter init guard name))
+       this]))
 
 
+  (begin-for-syntax
+    (define-splicing-syntax-class flag-formal
+      #:description "flag argument clause"
+      #:attributes [kw name init-expr fun-arg/c definitions]
+      (pattern
+        (~seq (~describe "function formal"
+                         (~seq kw:keyword
+                               (~or* (~describe "argument name"
+                                                name:id)
+                                     (~describe "identifier with initializer"
+                                                [name:id custom-init-expr:expr]))))
+
+              (~describe "parameter description"
+                         (~seq
+                          --name:id
+                          (~optional (~seq (~optional (~and #:multi multi?))
+                                           (~var parsed-cli-arg/c-expr
+                                                 (expr/c #'flat-contract?
+                                                         #:name "cli contract expression")))))))
+        #:attr parsed-cli-arg/c (and (attribute parsed-cli-arg/c-expr.c)
+                                     (format-id #'foo "~a/parsed/c" #'--name))
+        #:attr fun-arg/c #`(~? (~? (and 'multi? (listof parsed-cli-arg/c))
+                                   (or/c #f parsed-cli-arg/c))
+                               not-string/c)
+        #:with (~var param-expr (expr/c #'(~? (nat-flag-parameter/c parsed-cli-arg/c (~? 'multi? #f))
+                                              bool-flag-parameter/c)
+                                        #:name "flag parameter"))
+        (quasisyntax/loc #'--name
+          (make-flag-parameter '--name
+                               (~? (~@ parsed-cli-arg/c (~? (and 'multi? null) #f)))))
+        #:attr init-expr #`(~? custom-init-expr (--name))
+        #:attr definitions #`(begin
+                               (~? (define parsed-cli-arg/c parsed-cli-arg/c-expr.c))
+                               (define --name 'param-expr.c)))))
 
 
+  (define-simple-macro (define-main (~describe "function header"
+                                               (name:id arg:flag-formal ...))
+                         body:expr ...+)
+    #:with (~var lambda-expr (expr/c #'(->* [] [(~@ arg.kw arg.fun-arg/c) ...] any)))
+    (quasisyntax/loc this-syntax
+      (λ ({~@ arg.kw [arg.name arg.init-expr]} ...)
+        body ...))
+    (begin arg.definitions ...
+           (define name lambda-expr.c)))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+  (define-main (indent-test-data-cli
+                #:add-from-nat to-add --add-from-nat #:multi natural-number/c
+                #:add-random num-random-to-add --add-random exact-positive-integer?
+                #:redo-python? redo-python? --redo-python
+                #:validate to-validate --validate #:multi natural-number/c
+                #:validate-all? [validate-all? (or (--validate-all)
+                                                   (and (null? to-validate)
+                                                        (null? to-add)
+                                                        (not num-random-to-add)))]
+                --validate-all)
+    (for-each add-from-nat to-add)
+    (when num-random-to-add
+      (error "--add-random" num-random-to-add))
+    (cond
+      [(or validate-all?
+           (and (null? to-validate)
+                (null? to-add)
+                (not num-random-to-add)))
+       (error "--validate-all" redo-python?)]
+      [else
+       (validate-list #:redo-python? redo-python? to-validate)])
+    (displayln "The end.")))
 
 ;
+;
+;
+;
+;
+;
+;
+;
+;
+;    ;;;;    ;; ;;;   ;;   ;;  ;;;;;; ;;;
+;   ;;   ;   ;;;  ;   ;;   ;;  ;;  ;;;  ;;
+;   ;    ;;  ;;   ;;  ;;   ;;  ;;   ;;   ;
+;   ;    ;;  ;;   ;;  ;;   ;;  ;;   ;;   ;
+;   ;;;;;;;  ;;   ;;  ;;   ;;  ;;   ;;   ;
+;   ;        ;;   ;;  ;;   ;;  ;;   ;;   ;
+;   ;        ;;   ;;  ;;   ;;  ;;   ;;   ;
+;   ;;   ;   ;;   ;;   ;  ;;;  ;;   ;;   ;
+;    ;;;;    ;;   ;;   ;;; ;;  ;;   ;;   ;
+;
+;
+;
+;
+;
+
+
+
+
 (module enum racket
   (provide (all-from-out data/enumerate/lib)
            (all-defined-out))
@@ -153,6 +339,8 @@
   (define test-datum/e
     (list/e portable-indent/e
             compound-jsobject/e)))
+
+;; ---------------------------------------------------------------------------------
 (module dynamic-enum racket
   (require syntax/modresolve
            (for-syntax racket/base syntax/transformer))
@@ -171,10 +359,29 @@
     in-indent-order-cycle random-element to-nat from-nat))
 
 
-
-
-
-
+;
+;
+;
+;
+;
+;
+;
+;                            ;
+;                            ;
+;    ;;;;  ;;    ;   ;;;;  ;;;;;   ;;;;    ;;;;;; ;;;
+;   ;   ;   ;    ;  ;   ;    ;    ;;   ;   ;;  ;;;  ;;
+;   ;       ;   ;;  ;        ;    ;    ;;  ;;   ;;   ;
+;   ;;      ;;  ;   ;;       ;    ;    ;;  ;;   ;;   ;
+;    ;;;;    ;  ;    ;;;;    ;    ;;;;;;;  ;;   ;;   ;
+;       ;;   ;  ;       ;;   ;    ;        ;;   ;;   ;
+;       ;;   ; ;;       ;;   ;    ;        ;;   ;;   ;
+;   ;   ;;    ;;    ;   ;;   ;    ;;   ;   ;;   ;;   ;
+;    ;;;;     ;;     ;;;;    ;;;   ;;;;    ;;   ;;   ;
+;             ;;
+;             ;
+;             ;
+;           ;;;
+;
 
 
 (module system racket
@@ -238,197 +445,36 @@
 }
              json)))))
 
-
-
-
-
-(module+ cli
-
-
-
-  
-
-  (define not-string/c
-  (let ()
-    (define (not-string/c x)
-      (or (not (string? x))
-          (λ (blame)
-            (raise-blame-error
-             blame x
-             `(";\n boolean switches do not parse argument strings"
-               expected: "(not/c string?)" given: "~e")
-             x))))
-    (flat-contract-with-explanation not-string/c)))
-
-(define bool-flag-parameter/c
-  (parameter/c not-string/c boolean?))
-  
-(define (nat-flag-parameter/c parsed-cli-arg/c multi?)
-  (parameter/c (or/c string?
-                     parsed-cli-arg/c
-                     ; avoid confusion with and/c
-                     (if multi? (listof parsed-cli-arg/c) #f))
-               (if multi?
-                   (listof parsed-cli-arg/c)
-                   (or/c #f parsed-cli-arg/c))))
-  
-(define make-flag-parameter
-  (case-lambda
-    [(name) ; This is a boolean switch: nothing to parse.
-     (make-parameter #f (λ (x) (and x #t)) name)]
-    [(name parsed-arg-ok? init)
-     (define (parse-string str)
-       (define n (string->number str))
-       (unless (parsed-arg-ok? n)
-         (raise-arguments-error 'indent-test-data-cli
-                                "bad argument to switch"
-                                "switch" name
-                                "expected" check
-                                "given" (unquoted-printing-string str)))
-       n)
-     (define (parse-new x)
-       (if (string? x)
-           (parse-string x)
-           x))
-     (define guard
-       (cond
-         [(null? init) ; List parameter: replace list or cons on new value.
-          (λ (x)      #; (this atom) #|is short for|# #;(this (cons (parse-new atom) (this)))
-            (if (list? x)
-                x
-                (cons (parse-new x) (this))))]
-         [else
-          parse-new]))
-     (define this
-       (make-parameter init guard name))
-     this]))
-
-
-
-
-
-  
-(begin-for-syntax
-  (define-splicing-syntax-class flag-formal
-    #:description "flag argument clause"
-    #:attributes [kw name init-expr fun-arg/c definitions]
-    (pattern (~seq (~describe "function formal"
-                              (~seq kw:keyword
-                                    (~or* (~describe "argument name"
-                                                     name:id)
-                                          (~describe "identifier with initializer"
-                                                     [name:id custom-init-expr:expr]))))
-                                                      
-                   (~describe "parameter description"
-                              (~seq 
-                               --name:id
-                               (~optional (~seq (~optional (~and #:multi multi?))
-                                                (~var parsed-cli-arg/c-expr
-                                                      (expr/c #'flat-contract?
-                                                              #:name "cli contract expression")))))))
-      #:attr parsed-cli-arg/c (and (attribute parsed-cli-arg/c-expr.c)
-                                   (format-id #'foo "~a/parsed/c" #'--name))
-      #:attr fun-arg/c #`(~? (~? (and 'multi? (listof parsed-cli-arg/c))
-                                 (or/c #f parsed-cli-arg/c))
-                             not-string/c)
-      #:with (~var param-expr (expr/c #'(~? (nat-flag-parameter/c parsed-cli-arg/c (~? 'multi? #f))
-                                            bool-flag-parameter/c)
-                                      #:name "flag parameter"))
-      (quasisyntax/loc #'--name
-        (make-flag-parameter '--name
-                             (~? (~@ parsed-cli-arg/c (~? (and 'multi? null) #f)))))
-      #:attr init-expr #`(~? custom-init-expr (--name))
-      #:attr definitions #`(begin
-                             (~? (define parsed-cli-arg/c parsed-cli-arg/c-expr.c))
-                             (define --name 'param-expr.c)))))
-
-
-
-
-
-
-  
-
-(define-simple-macro (define-main (~describe "function header"
-                                             (name:id arg:flag-formal ...))
-                       body:expr ...+)
-  #:with (~var lambda-expr (expr/c #'(->* [] [(~@ arg.kw arg.fun-arg/c) ...] any)))
-  (quasisyntax/loc this-syntax
-    (λ ({~@ arg.kw [arg.name arg.init-expr]} ...)
-      body ...))
-  (begin arg.definitions ...
-         (define name lambda-expr.c)))
-           
-                       
-(define-main (indent-test-data-cli
-              #:add-from-nat to-add --add-from-nat #:multi natural-number/c
-              #:add-random num-random-to-add --add-random exact-positive-integer?
-              #:redo-python? redo-python? --redo-python
-              #:validate to-validate --validate #:multi natural-number/c  
-              #:validate-all? [validate-all? (or (--validate-all)
-                                                 (and (null? to-validate)
-                                                      (null? to-add)
-                                                      (not num-random-to-add)))]
-              --validate-all)
-  (for-each add-from-nat to-add)
-  (when num-random-to-add
-    (error "--add-random" num-random-to-add))
-  (cond
-    [(or validate-all?
-         (and (null? to-validate)
-              (null? to-add)
-              (not num-random-to-add)))
-     (error "--validate-all" redo-python?)]
-    [else
-     (validate-list #:redo-python? redo-python? to-validate)])
-  (displayln "The end.")))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+;
+;
+;
+;
+;
+;
+;
+;                                                     ;
+;        ;;                                           ;
+;    ;;;;    ;;;;    ;; ;;;    ;;;;    ;; ;   ;;;;  ;;;;;   ;;;;
+;   ;;  ;;  ;;   ;   ;;;  ;   ;;   ;   ;;;   ;;  ;;   ;    ;;   ;
+;   ;    ;  ;    ;;  ;;   ;;  ;    ;;  ;;         ;   ;    ;    ;;
+;   ;    ;  ;    ;;  ;;   ;;  ;    ;;  ;;         ;   ;    ;    ;;
+;   ;;   ;  ;;;;;;;  ;;   ;;  ;;;;;;;  ;;     ;;;;;   ;    ;;;;;;;
+;    ;;;;   ;        ;;   ;;  ;        ;;    ;    ;   ;    ;
+;    ;      ;        ;;   ;;  ;        ;;    ;    ;   ;    ;
+;   ;       ;;   ;   ;;   ;;  ;;   ;   ;;    ;  ;;;   ;    ;;   ;
+;   ;;;;;;   ;;;;    ;;   ;;   ;;;;    ;;    ;;;; ;;  ;;;   ;;;;
+;   ;    ;;
+;   ;     ;
+;   ;    ;;
+;    ;;;;;
+;
+
+(provide add-from-nat
+         validate-list)
+
+(require 'dynamic-enum
+         'system
+         rackunit)
 
 
 (define (dir-for-nat n)
