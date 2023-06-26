@@ -541,7 +541,21 @@
    (file->string pth)))
     
 (define (validate nat #:redo-python? [redo-python? #f])
-  (parameterize ([current-directory (dir-for-nat nat)])
+  (define all-ok? #t)
+  (parameterize* ([current-directory (dir-for-nat nat)]
+                  [current-test-case-around
+                   (let ([super-test-case-around (current-test-case-around)]
+                         [dir (current-directory)])
+                     (λ (thunk)
+                       (super-test-case-around
+                        (λ ()
+                          (define super-check-handler (current-check-handler))
+                          (parameterize ([current-directory dir]
+                                         [current-check-handler
+                                          (λ (x)
+                                            (set! all-ok? #f)
+                                            (super-check-handler x))])
+                            (thunk))))))])
     (python-write-for-nat nat #:redo-python? redo-python?)
     (match-define (list indent jsexpr) (datum-from-nat nat))
     (test-case
@@ -554,8 +568,9 @@
                   jsexpr)
      (test-equal? "python.json is identical to node.json"
                   (file->string "python.json")
-                  (file->string "node.json")))))
-  
+                  (file->string "node.json"))))
+  all-ok?)
+
 (define (validate-list nats #:redo-python? [redo-python? #f])
   (for-each (λ (n)
               (validate n #:redo-python? redo-python?))
