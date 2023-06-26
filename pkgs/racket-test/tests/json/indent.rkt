@@ -50,9 +50,14 @@
      #:help-labels
      "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
      #:args ()
-     (indent-test-data-cli)
-     (exit 0)))
+     (indent-test-data-cli)))
 
+  (provide indent-test-data-cli
+           --add-from-nat
+           --add-random
+           --validate-all
+           --validate
+           --redo-python)
 
   ;
   ;
@@ -110,7 +115,6 @@
            (submod ".." dynamic-enum)
            (submod ".." #;generate-and-validate)
            syntax/parse/define)
-
 
 
 
@@ -229,16 +233,15 @@
                 --validate-all)
     (for-each add-from-nat to-add)
     (when num-random-to-add
-      (error "--add-random" num-random-to-add))
+      (add-random num-random-to-add))
     (cond
       [(or validate-all?
            (and (null? to-validate)
                 (null? to-add)
                 (not num-random-to-add)))
-       (error "--validate-all" redo-python?)]
+       (validate-all #:redo-python? redo-python?)]
       [else
-       (validate-list #:redo-python? redo-python? to-validate)])
-    (displayln "The end.")))
+       (validate-list #:redo-python? redo-python? to-validate)])))
 
 ;
 ;
@@ -391,13 +394,11 @@
   (define portable-indent/c ; <--------------------------- Should this live here?
     (or/c #\tab (integer-in 1 10)))
   (define/contract ((make-runner name #:try-first [try-first #f]
-                                 make-args
-                                 #:after-thunk [after-thunk void])
+                                 make-args)
                     indent js)
     (->* [string?
           (-> string? string? (listof string?))]
-         [#:try-first (or/c #f string?)
-          #:after-thunk (-> any)]
+         [#:try-first (or/c #f string?)]
          (-> portable-indent/c jsexpr? any))
     (define args
       (make-args
@@ -432,12 +433,11 @@
       (err "command failed"
            "exit code" code
            name prog))
-    (after-thunk)
+    (newline)
     (cons prog args))
   (define node-write-json
     (make-runner
      "node"
-     #:after-thunk newline
      (λ (indent json)
        (list "-e"
              @string-append{
@@ -483,8 +483,12 @@
 ;    ;;;;;
 ;
 
+;(module generate-and-validate racket/base
 (provide add-from-nat
-         validate-list)
+         add-random
+         validate
+         validate-list
+         validate-all)
 
 (require 'dynamic-enum
          'system
@@ -539,41 +543,35 @@
 (define (file->jsexpr pth)
   (string->jsexpr ; ensure whole file is consumed
    (file->string pth)))
-    
+
 (define (validate nat #:redo-python? [redo-python? #f])
-  (define all-ok? #t)
-  (parameterize* ([current-directory (dir-for-nat nat)]
-                  [current-test-case-around
-                   (let ([super-test-case-around (current-test-case-around)]
-                         [dir (current-directory)])
-                     (λ (thunk)
-                       (super-test-case-around
-                        (λ ()
-                          (define super-check-handler (current-check-handler))
-                          (parameterize ([current-directory dir]
-                                         [current-check-handler
-                                          (λ (x)
-                                            (set! all-ok? #f)
-                                            (super-check-handler x))])
-                            (thunk))))))])
+  (parameterize ([current-directory (dir-for-nat nat)])
     (python-write-for-nat nat #:redo-python? redo-python?)
-    (match-define (list indent jsexpr) (datum-from-nat nat))
+    (match-define (and datum (list indent jsexpr))
+      (datum-from-nat nat))
     (test-case
      (string-append (number->string nat) "/")
      (test-equal? "datum.rktd contains correct value"
                   (file->value "datum.rktd")
-                  jsexpr)
+                  datum)
      (test-equal? "node.json contains correct value"
                   (file->jsexpr "node.json")
                   jsexpr)
      (test-equal? "python.json is identical to node.json"
                   (file->string "python.json")
-                  (file->string "node.json"))))
-  all-ok?)
+                  (file->string "node.json")))))
 
 (define (validate-list nats #:redo-python? [redo-python? #f])
   (for-each (λ (n)
               (validate n #:redo-python? redo-python?))
             nats))
 
+(define (validate-all #:redo-python? [redo-python? #f])
+  (validate-list #:redo-python? redo-python?
+                 (parameterize ([current-directory indent-test-data/])
+                   (for/list ([pth (in-list (directory-list))]
+                              #:when (directory-exists? pth))
+                     (string->number (path->string pth))))))
 
+(define (add-random num-random-to-add)
+  (raise-argument-error 'add-random "TODO"))
