@@ -4,7 +4,7 @@
   (require racket/runtime-path)
   (define-runtime-path indent-test-data/
     "indent-test-data/")
-  (provide indent-test-data/))
+  (provide (all-defined-out)))
 (require 'data
          "../../../../racket/collects/json/main.rkt")
 
@@ -203,7 +203,7 @@
         #:attr init-expr #`(~? custom-init-expr (--name))
         #:attr definitions #`(begin
                                (~? (define parsed-cli-arg/c parsed-cli-arg/c-expr.c))
-                               (define --name 'param-expr.c)))))
+                               (define --name param-expr.c)))))
 
 
   (define-simple-macro (define-main (~describe "function header"
@@ -388,13 +388,24 @@
   (provide node-write-json
            python-write-json)
   (require json)
-  (define ((make-runner name #:try-first [try-first #f] make-args) indent js)
+  (define portable-indent/c ; <--------------------------- Should this live here?
+    (or/c #\tab (integer-in 1 10)))
+  (define/contract ((make-runner name #:try-first [try-first #f]
+                                 make-args
+                                 #:after-thunk [after-thunk void])
+                    indent js)
+    (->* [string?
+          (-> string? string? (listof string?))]
+         [#:try-first (or/c #f string?)
+          #:after-thunk (-> any)]
+         (-> portable-indent/c jsexpr? any))
     (define args
       (make-args
-       (jsexpr->string js) ; no easy JS equivalent to sort_keys, so make Racket do it
        (if (eqv? #\tab indent)
            @quote{"\t"}
-           (number->string indent))))
+           (number->string indent))
+       ;; no easy JS equivalent to sort_keys, so make Racket do it
+       (jsexpr->string js)))
     (define (err msg . extra-fields)
       (apply raise-arguments-error
              (string->symbol name)
@@ -420,10 +431,13 @@
     (unless (zero? code)
       (err "command failed"
            "exit code" code
-           name prog)))
+           name prog))
+    (after-thunk)
+    (cons prog args))
   (define node-write-json
     (make-runner
      "node"
+     #:after-thunk newline
      (λ (indent json)
        (list "-e"
              @string-append{
@@ -434,7 +448,7 @@
      "python" #:try-first "python3"
      (λ (indent json)
        (list "-c"
-             @string-append-immutable{
+             @string-append{
  import json
  import sys
  json.dump(json.loads(sys.argv[-1]),
@@ -474,17 +488,67 @@
 
 (require 'dynamic-enum
          'system
+         (for-syntax (for-syntax racket/base
+                                 racket/syntax
+                                 racket/list
+                                 syntax/parse)
+                     syntax/parse)
          rackunit)
+(void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
 
-
-(define (dir-for-nat n)
+(define (dir-from-nat n)
   (build-path indent-test-data/ (number->string n)))
+(define (datum-from-nat n)
+  (from-nat test-datum/e n))
 
-(define (add-from-nat which)
-  (define datum
-    (from-nat test-datum/e which))
-  (define dir
-    (dir-for-nat which))
+(define-syntax define-from-nat
+  (syntax-parser
+    [(_ (~alt (~once (~and nat-expr (~datum nat)))
+              (~optional (~and dir-str (~datum dir-str)))
+              (~describe "file name"
+                         (~and file-name
+                               (~or* (~datum datum.rktd)
+                                     (~datum node.json)
+                                     (~datum python.json)
+                                     (~datum args.node.rktd)
+                                     (~datum args.python.json))
+                               (~bind 
+(define-syntax define-from-nat/recur
+
+(begin-for-syntax
+  (define-syntax-class id-with-str
+    #:description #f
+    #:attributes [str]
+    (pattern name:id
+      #:attr str (datum->syntax #'name (symbol->string (syntax-e id)))))
+  (define-syntax ~symbolic
+    (pattern-expander
+     (syntax-parser
+       [(_ name:id)
+        #`(~and (~var name id-with-str) (~datum name))]
+       [(_ #:optional name:id ... #:too-many too-mant:string)
+        #:fail-when (check-duplicates (syntax->list #'(name ...))
+                                      eq? #:key syntax-e)
+        "duplicate symbolic identifier"
+        #`(~alt (~optional
+
+                     (symbol->string (syntax-e id))
+  (define-simple-macro (define-symbolic-identifiers-syntax-class name:id
+                         pre ...
+                         #: (~literal pattern) name:id [datum:id ...]
+                         post ...)
+    (define-syntax-class name
+      pre ...
+      (pattern (~and name (or* (~datum datum) ...)|#
+#;
+(begin-for-syntax
+  (define-syntax-class known-file
+    (pattern name:id
+      )))
+
+(define (add-from-nat nat)
+  (define datum (datum-from-nat nat))
+  (define dir (dir-from-nat nat))
   (make-directory dir)
   (call-with-output-file* (build-path dir "datum.rktd")
     (λ (out)
@@ -492,13 +556,13 @@
   (with-output-to-file (build-path dir "node.json")
     (λ ()
       (apply node-write-json datum)))
-  (validate which))
+  (validate nat))
 
-(define (validate which #:redo-python? [redo-python? #f])
+(define (validate nat #:redo-python? [redo-python? #f])
   (define datum
-    (from-nat test-datum/e which))
+    (from-nat test-datum/e nat))
   (define dir
-    (dir-for-nat which))
+    (dir-from-nat nat))
   (check-pred (λ (x)
                 (equal? datum (file->value x)))
               (build-path dir "datum.rktd"))
@@ -523,3 +587,21 @@
             nats))
   (unless (null? problems)
     (error "validate-list" problems)))
+
+
+
+
+
+
+
+
+
+
+
+
+(node-write-json #\tab null)
+
+
+
+
+
