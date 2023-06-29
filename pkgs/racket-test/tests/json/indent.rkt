@@ -255,8 +255,6 @@
            (all-defined-out))
   (require data/enumerate/lib
            racket/symbol)
-  (define (random-element e)
-    (from-nat e (random-index e)))
   (define portable-indent/e ; levels above 10 are not reproducible in JS
     (or/e (single/e #\tab) (except/e (below/e 11) 0)))
   (define (jsnull? x)
@@ -267,29 +265,26 @@
     (and (inexact-real? x) (rational? x)))
   (define inexact-rational/e
     (except/e flonum/e +inf.0 -inf.0 +nan.0 #:contract inexact-rational?))
-  ;; Tie together enumerations of JS-Expressions, or subsets of them.
-  (define (knot-json/e knot-array/e knot-object/e atom/e)
-    (letrec ([expr/e
-              (delay/e (or/e (cons array/e list?)
-                             (cons object/e hash?)
-                             (cons atom/e (λ (x)
-                                            (or (exact-integer? x)
-                                                (inexact-rational? x)
-                                                (boolean? x)
-                                                (string? x)
-                                                (jsnull? x))))))]
-             [array/e (knot-array/e expr/e)]
-             [object/e (knot-object/e expr/e)])
-      (define compound/e
-        (or/e (cons array/e list?)
-              (cons object/e hash?)))
-      ;; reflect order of our arguments
-      (values array/e object/e atom/e compound/e expr/e)))
-  (define ((knot-object*/e key/e) expr/e)
+  (define jsatom/e
+    (or/e jsnull/e
+          bool/e
+          string/e
+          integer/e
+          inexact-rational/e))
+  (define jsexpr/e
+    (delay/e (or/e (cons jsarray/e list?)
+                   (cons jsobject/e hash?)
+                   (cons jsatom/e (λ (x)
+                                    (or (exact-integer? x)
+                                        (inexact-rational? x)
+                                        (boolean? x)
+                                        (string? x)
+                                        (jsnull? x)))))))
+  (define jsobject/e
     (or/e
      (single/e #hasheq())
      (map/e #:contract (recursive-contract
-                        (and/c (hash/c symbol? (enum-contract expr/e) #:immutable #t)
+                        (and/c (hash/c symbol? (enum-contract jsexpr/e) #:immutable #t)
                                hash-eq?
                                (property/c hash-count (not/c 0)))
                         #:flat)
@@ -298,86 +293,75 @@
                (for/hasheq ([k (in-list
                                 (sort (set->list keys) symbol<?))]
                             [v (in-list
-                                (from-nat (listof-n/e expr/e (set-count keys))
+                                (from-nat (listof-n/e jsexpr/e (set-count keys))
                                           index))])
                  (values k v))])
             (λ (hsh)
               (cons (for/seteq ([k (in-immutable-hash-keys hsh)])
                       k)
-                    (to-nat (listof-n/e expr/e (hash-count hsh))
+                    (to-nat (listof-n/e jsexpr/e (hash-count hsh))
                             (hash-values hsh 'ordered))))
-            (cons/e (except/e (set/e key/e) (set))
+            (cons/e (except/e (set/e symbol/e) (set))
                     natural/e))))
-  (define-values [jsarray/e jsobject/e jsatom/e compound-jsexpr/e jsexpr/e]
-    (knot-json/e listof/e
-                 (knot-object*/e symbol/e)
-                 (or/e jsnull/e
-                       bool/e
-                       string/e
-                       integer/e
-                       inexact-rational/e)))
+  (define jsarray/e
+    (listof/e jsexpr/e))
+  (define compound-jsexpr/e
+    (or/e (cons jsarray/e list?)
+          (cons jsobject/e hash?)))
   (define test-datum/e
     (list/e portable-indent/e compound-jsexpr/e))
-  ;; For random generation, constrain symbols, strings, and integers 
-  ;; to focus on variation in arrays and objects.
-  ;; DO NOT change `test-datum/e`, which enumerates all possibilities.
+  ;;;;;;;;;
   (define constrained-char/e
     (let ([base/e (append/e (range/e 48 57) ;[0-9]
                             (range/e 65 90) ;[A-Z]
                             (range/e 97 122))]) ;[a-z]
-                         
       (map/e integer->char
              char->integer
-             base/e
              #:contract (and/c char? (property/c char->integer
-                                                 (enum-contract base/e))))))
+                                                 (enum-contract base/e)))
+             base/e)))
   (define constrained-string/e
-    (let* ([max-len 2];5] ; not too long, or set/e will run out of memory
-           [char-list/e
-            (map/e cdr
-                   (λ (lst)
-                     (cons (length lst) lst))
-                   (cons/de
-                    [len (range/e 0 max-len)]
-                    [chars (len)
-                     (listof-n/e constrained-char/e len)]
-                    #:dep-expression-finite? #t)
-                   #:contract (and/c (listof (enum-contract constrained-char/e))
-                                     (property/c length (<=/c max-len))))
-            #;
-            (apply append/e
-                   (for/list ([len (in-inclusive-range 0 max-len)])
-                     (cons (listof-n/e constrained-char/e len)
-                           (λ (lst)
-                             (and (list? lst)
-                                  (= len (length lst)))))))])
-      (map/e list->string
-             string->list
-             char-list/e
-             #:contract (and/c string? (property/c string->list
-                                                   (and/c (listof (enum-contract constrained-char/e))
-                                                          (property/c length (<=/c max-len))))))))
+    (map/e list->string
+           string->list
+           #:contract (and/c string? (property/c string->list
+                                                 (listof (enum-contract constrained-char/e))))
+           (listof/e constrained-char/e)))
   (define constrained-symbol/e
     (map/e string->symbol
            symbol->immutable-string
-           constrained-string/e
            #:contract (and/c symbol? (property/c symbol->immutable-string
-                                                 (enum-contract constrained-string/e)))))
+                                                 (enum-contract constrained-string/e)))
+           constrained-string/e))
   (define int32/e
     (range/e (- (expt 2 31))
              (- (expt 2 31) 1)))
-  (define-values [constrained-jsarray/e
-                  constrained-jsobject/e
-                  constrained-jsatom/e
-                  constrained-compound-jsexpr/e
-                  constrained-jsexpr/e]
-    (knot-json/e listof/e
-                 (knot-object*/e constrained-symbol/e)
-                 (or/e jsnull/e
-                       bool/e
-                       constrained-string/e
-                       int32/e
-                       inexact-rational/e)))
+  (define constrained-jsatom/e
+    (or/e jsnull/e
+          bool/e
+          constrained-string/e
+          int32/e
+          inexact-rational/e))
+  (define (random-element e)
+    (from-nat e (random-index e)))
+  (define (random-compound-jsexpr [max-nesting 8])
+    (define max-length 5)
+    (define (coin-toss)
+      (zero? (random 2)))
+    (define lst
+      (for/list ([i (in-inclusive-range 0 (random (add1 max-length)))])
+        (if (or (zero? max-nesting)
+                (coin-toss))
+            (random-element jsatom/e #;constrained-jsatom/e)
+            (random-compound-jsexpr (sub1 max-nesting)))))
+    (if (coin-toss)
+        lst
+        (for/fold ([hsh #hasheq()])
+                  ([rhs (in-list lst)])
+          (let retry ()
+            (define key (random-element symbol/e #;constrained-symbol/e))
+            (if (hash-has-key? hsh key)
+                (retry)
+                (hash-set hsh key rhs))))))
   ;;
   (define indent-order/e
     (let ([nats/e (permutations-of-n/e (enum-count portable-indent/e))])
@@ -412,9 +396,11 @@
                  (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
            (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
   (define/provide
-    test-datum/e constrained-compound-jsexpr/e portable-indent/e
-    in-indent-order-cycle random-element to-nat from-nat))
-
+    test-datum/e
+    random-compound-jsexpr
+    in-indent-order-cycle
+    to-nat
+    from-nat))
 
 ;
 ;
@@ -544,7 +530,7 @@
          validate-list
          validate-all)
 
-(require #;'dynamic-enum
+(require 'dynamic-enum
          'system
          rackunit)
 (void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
@@ -633,8 +619,7 @@
     ;; Use all indentations as equally with as possible,
     ;; with a random selection for the remainder.
     (let retry ()
-      (define jsexpr
-        (random-element constrained-compound-jsexpr/e))
+      (define jsexpr (random-compound-jsexpr))
       (define nat (to-nat test-datum/e (list indent jsexpr)))
       (cond
         [(directory-exists? (dir-for-nat nat))
@@ -642,20 +627,14 @@
                    `@{
          Encountered previously added datum @,nat while adding @;
          @,@(if (= 1 num-random-to-add)
-                '()
-                @list{the @n->th[i] of @|num-random-to-add| })@;
-         randomly chosed data.
+                '@{a}
+                @list{the @n->th[i] of @|num-random-to-add|}) @;
+         randomly chosen @,(if (= 1 num-random-to-add)
+                               "datum"
+                               "data").
          Validating it before moving on.@"\n"})
          (validate nat #:redo-python? redo-python?)
          (retry)]
         [else
          (add-from-nat nat)
          nat]))))
-
-(require (submod "." enum))
-(= (to-nat jsobject/e #hasheq([a . 1][b . 2]))
-   2903619)
-(to-nat constrained-jsexpr/e '())
-(to-nat constrained-jsobject/e #hasheq())
-(to-nat constrained-jsobject/e #hasheq([a . 1]))
-(to-nat constrained-jsobject/e #hasheq([a . 1][b . 2]))
