@@ -1,5 +1,7 @@
 #lang at-exp racket ;/base
 
+;; This files assumes `(eq? 'null (json-null))`.
+
 (module data racket/base
   (require racket/runtime-path)
   (define-runtime-path indent-test-data/
@@ -207,10 +209,11 @@
     (for-each add-from-nat to-add)
     (when num-random-to-add
       (define done (add-random num-random-to-add #:redo-python? redo-python?))
-      (displayln "Added data in these randomly-chosen directories:")
-      (displayln (string-join #:before-first "  "
-                              (map number->string done) "/\n  "
-                              #:after-last "/")))
+      (for-each display
+                (if (= 1 num-random-to-add)
+                    @list{Added data in randomly chosen directory "@car[done]/".@"\n"}
+                    (cons "Added data in these randomly-chosen directories:\n  "
+                          (add-between done "/\n  " #:after-last '("/\n"))))))
     (cond
       [(or validate-all?
            (and (null? to-validate)
@@ -250,30 +253,42 @@
 (module enum racket
   (provide (all-from-out data/enumerate/lib)
            (all-defined-out))
-  (require data/enumerate/lib)
+  (require data/enumerate/lib
+           racket/symbol)
+  (define portable-indent/e ; levels above 10 are not reproducible in JS
+    (or/e (single/e #\tab) (except/e (below/e 11) 0)))
+  (define (jsnull? x)
+    (eq? x 'null))
   (define jsnull/e
     (single/e 'null #:equal? eq?))
+  (define (inexact-rational? x) ; not nan or inf
+    (and (inexact-real? x) (rational? x)))
   (define inexact-rational/e
-    (except/e flonum/e +inf.0 -inf.0 +nan.0
-              #:contract (and/c inexact-real? rational?)))
-  (define jsatom/e
-    (or/e jsnull/e
-          bool/e
-          string/e
-          integer/e
-          inexact-rational/e))
-  (define jsexpr/e
-    (delay/e (or/e (cons jsarray/e list?)
-                   (cons jsobject/e hash?)
-                   jsatom/e)))
-  (define jsarray/e
-    (listof/e jsexpr/e))
-  (define jsobject/e
+    (except/e flonum/e +inf.0 -inf.0 +nan.0 #:contract inexact-rational?))
+  ;; Tie together enumerations of JS-Expressions, or subsets of them.
+  (define (knot-json/e knot-object/e knot-array/e atom/e)
+    (define-syntax-rule (or/c ? ...)
+      (λ (x) (or (? x) ...)))
+    (letrec ([compound/e
+              (delay/e (or/e (cons array/e list?)
+                             (cons object/e hash?)))]
+             [expr/e
+              (or/e (cons compound/e (or/c list? hash?))
+                    (cons atom/e (or/c exact-integer?
+                                       inexact-rational?
+                                       boolean?
+                                       string?
+                                       jsnull?)))]
+             [array/e (knot-array/e expr/e)]
+             [object/e (knot-object/e expr/e)])
+      ;; match the order of our arguments
+      (values object/e array/e atom/e compound/e expr/e
+              (list/e portable-indent/e compound/e))))
+  (define ((knot-object/e symbol/e) expr/e)
     (or/e
      (single/e #hasheq())
      (map/e #:contract (recursive-contract
-                        (and/c (hash/c symbol? (enum-contract jsexpr/e)
-                                       #:immutable #t)
+                        (and/c (hash/c symbol? (enum-contract expr/e) #:immutable #t)
                                hash-eq?
                                (property/c hash-count (not/c 0)))
                         #:flat)
@@ -282,18 +297,76 @@
                (for/hasheq ([k (in-list
                                 (sort (set->list keys) symbol<?))]
                             [v (in-list
-                                (from-nat (listof-n/e jsexpr/e (set-count keys))
+                                (from-nat (listof-n/e expr/e (set-count keys))
                                           index))])
                  (values k v))])
             (λ (hsh)
               (cons (for/seteq ([k (in-immutable-hash-keys hsh)])
                       k)
-                    (to-nat (listof-n/e jsexpr/e (hash-count hsh))
+                    (to-nat (listof-n/e expr/e (hash-count hsh))
                             (hash-values hsh 'ordered))))
             (cons/e (except/e (set/e symbol/e) (set))
                     natural/e))))
-  (define portable-indent/e ; levels above 10 are not reproducible in JS
-    (or/e (single/e #\tab) (except/e (below/e 11) 0)))
+  (define-values [jsobject/e
+                  jsarray/e
+                  jsatom/e compound-jsexpr/e jsexpr/e
+                  test-datum/e]
+    (knot-json/e (knot-object/e symbol/e)
+                 list/e
+                 (or/e jsnull/e
+                       bool/e
+                       string/e
+                       integer/e
+                       inexact-rational/e)))
+  ;; For random generation, constrain symbols, strings, and integers 
+  ;; to focus on variation in arrays and objects.
+  ;; DO NOT change `test-datum/e`, which enumerates all possibilities.
+  (define constrained-char/e
+    (let ([base/e (apply except/e
+                         (range/e 38 126)
+                         (map char->integer '(#\: #\[ #\] #\{ #\})))])
+      (map/e integer->char
+             char->integer
+             base/e
+             #:contract (and/c char? (property/c char->integer
+                                                 (enum-contract base/e))))))
+  (define constrained-string/e
+    (let* ([max-len 5] ; related to https://github.com/racket/racket/issues/4684
+           [char-list/e
+            (apply append/e
+                   (for/list ([len (in-inclusive-range 0 max-len)])
+                     (cons (listof-n/e constrained-char/e len)
+                           (λ (lst)
+                             (and (list? lst)
+                                  (= len (length lst)))))))])
+      (map/e list->string
+             string->list
+             char-list/e
+             #:contract (and/c string? (property/c string->list
+                                                   (and/c (listof (enum-contract constrained-char/e))
+                                                          (property/c length (<=/c max-len))))))))
+  (define constrained-symbol/e
+    (map/e string->symbol
+           symbol->immutable-string
+           constrained-string/e
+           #:contract (and/c symbol? (property/c symbol->immutable-string
+                                                 (enum-contract constrained-string/e)))))
+  (define int32/e
+    (range/e (- (expt 2 31))
+             (- (expt 2 31) 1)))
+  (define-values [constrained-object/e
+                  constrained-array/e
+                  constrained-atom/e constrained-compound-jsexpr/e constrained-jsexpr/e
+                  constrained-test-datum/e]
+    (knot-json/e (knot-object/e constrained-symbol/e)
+                 list/e
+                 (or/e jsnull/e
+                       bool/e
+                       constrained-string/e
+                       int32/e
+                       inexact-rational/e)))
+  
+  
   (define indent-order/e
     (let ([nats/e (permutations-of-n/e (enum-count portable-indent/e))])
       (define ((convert-all convert) lst)
@@ -312,13 +385,7 @@
   (define (random-element e)
     (from-nat e (random-index e)))
   (define (in-indent-order-cycle [which (random-index indent-order/e)])
-    (in-cycle (from-nat indent-order/e which)))
-  (define compound-jsobject/e
-    (or/e (cons jsarray/e list?)
-          (cons jsobject/e hash?)))
-  (define test-datum/e
-    (list/e portable-indent/e
-            compound-jsobject/e)))
+    (in-cycle (from-nat indent-order/e which))))
 
 ;; ---------------------------------------------------------------------------------
 (module dynamic-enum racket
@@ -335,7 +402,7 @@
                  (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
            (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
   (define/provide
-    test-datum/e compound-jsobject/e portable-indent/e
+    test-datum/e constrained-compound-jsexpr/e portable-indent/e
     in-indent-order-cycle random-element to-nat from-nat))
 
 
@@ -557,16 +624,18 @@
     ;; with a random selection for the remainder.
     (let retry ()
       (define jsexpr
-        (random-element compound-jsobject/e))
+        (random-element constrained-compound-jsexpr/e))
       (define nat (to-nat test-datum/e (list indent jsexpr)))
       (cond
         [(directory-exists? (dir-for-nat nat))
-         `@{Encountered previously added datum @,nat durring @;
+         (for-each display
+                   `@{
+         Encountered previously added datum @,nat durring @;
          @,@(if (= 1 num-random-to-add)
                 '()
                 @list{the @n->th[i] of @|num-random-to-add| steps of })@;
          random generation.
-         Validating it before moving on."\n"}
+         Validating it before moving on.@"\n"})
          (validate nat #:redo-python? redo-python?)
          (retry)]
         [else
