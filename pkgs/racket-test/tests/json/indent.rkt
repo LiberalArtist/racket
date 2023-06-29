@@ -351,6 +351,8 @@
               (cons/e (setof-n/e constrained-symbol/e len)
                       (listof-n/e jsexpr/e len))]))))
   (define jsarray/e
+    (listof/e jsexpr/e)
+    #;
     (or/e
      (single/e '())
      (map/e #:contract (and/c list? ;(listof (recursive-contract (enum-contract jsexpr/e) #:flat))
