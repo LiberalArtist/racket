@@ -84,38 +84,11 @@
   ;
 
 
-
-
-
-  ;
-  ;
-  ;
-  ;
-  ;
-  ;
-  ;   ;;;;  ;;     ;; ;;;;;;;;; ;;;;;;;  ;;;;;;;   ;;     ;;     ;;     ;;       ;;;;;
-  ;    ;;   ;;;    ;;     ;     ;;       ;;    ;;  ;;;    ;;     ;;     ;;      ;;   ;;
-  ;    ;;   ;;;    ;;     ;     ;;       ;;    ;;  ;;;    ;;    ;;;;    ;;      ;
-  ;    ;;   ;; ;   ;;     ;     ;;       ;;    ;;  ;; ;   ;;    ;  ;    ;;      ;
-  ;    ;;   ;; ;   ;;     ;     ;;       ;;    ;;  ;; ;   ;;    ;  ;    ;;      ;;
-  ;    ;;   ;;  ;  ;;     ;     ;;;;;;;  ;;    ;;  ;;  ;  ;;   ;;  ;;   ;;       ;;;;
-  ;    ;;   ;;  ;  ;;     ;     ;;       ;;;;;;;   ;;  ;  ;;   ;    ;   ;;          ;;;
-  ;    ;;   ;;   ; ;;     ;     ;;       ;;   ;    ;;   ; ;;   ;;;;;;   ;;            ;
-  ;    ;;   ;;   ; ;;     ;     ;;       ;;   ;    ;;   ; ;;  ;;    ;;  ;;            ;
-  ;    ;;   ;;    ;;;     ;     ;;       ;;   ;;   ;;    ;;;  ;      ;  ;;      ;     ;
-  ;    ;;   ;;    ;;;     ;     ;;       ;;    ;   ;;    ;;;  ;      ;  ;;      ;;   ;;
-  ;   ;;;;  ;;     ;;     ;     ;;;;;;;  ;;    ;;  ;;     ;;  ;      ;; ;;;;;;   ;;;;;
-  ;
-  ;
-  ;
-  ;
-  ;
-
   (require (for-syntax racket/syntax)
            (submod ".." dynamic-enum)
            (submod ".." #;generate-and-validate)
            syntax/parse/define)
-
+  
 
 
   (define not-string/c
@@ -233,7 +206,11 @@
                 --validate-all)
     (for-each add-from-nat to-add)
     (when num-random-to-add
-      (add-random num-random-to-add))
+      (define done (add-random num-random-to-add #:redo-python? redo-python?))
+      (displayln "Added data in these randomly-chosen directories:")
+      (displayln (string-join #:before-first "  "
+                              (map number->string done) "/\n  "
+                              #:after-last "/")))
     (cond
       [(or validate-all?
            (and (null? to-validate)
@@ -573,5 +550,25 @@
                               #:when (directory-exists? pth))
                      (string->number (path->string pth))))))
 
-(define (add-random num-random-to-add)
-  (raise-argument-error 'add-random "TODO"))
+(define (add-random num-random-to-add #:redo-python? [redo-python? #f])
+  (for/list ([i (in-inclusive-range 1 num-random-to-add)]
+             [indent (in-indent-order-cycle)])
+    ;; Use all indentations as equally with as possible,
+    ;; with a random selection for the remainder.
+    (let retry ()
+      (define jsexpr
+        (random-element compound-jsobject/e))
+      (define nat (to-nat test-datum/e (list indent jsexpr)))
+      (cond
+        [(directory-exists? (dir-for-nat nat))
+         `@{Encountered previously added datum @,nat durring @;
+         @,@(if (= 1 num-random-to-add)
+                '()
+                @list{the @n->th[i] of @|num-random-to-add| steps of })@;
+         random generation.
+         Validating it before moving on."\n"}
+         (validate nat #:redo-python? redo-python?)
+         (retry)]
+        [else
+         (add-from-nat nat)
+         nat]))))
