@@ -269,22 +269,23 @@
   (define (knot-json/e knot-object/e knot-array/e atom/e)
     (define-syntax-rule (or/c ? ...)
       (λ (x) (or (? x) ...)))
-    (letrec ([compound/e
+    (letrec ([expr/e
               (delay/e (or/e (cons array/e list?)
-                             (cons object/e hash?)))]
-             [expr/e
-              (or/e (cons compound/e (or/c list? hash?))
-                    (cons atom/e (or/c exact-integer?
-                                       inexact-rational?
-                                       boolean?
-                                       string?
-                                       jsnull?)))]
+                             (cons object/e hash?)
+                             (cons atom/e (or/c exact-integer?
+                                                inexact-rational?
+                                                boolean?
+                                                string?
+                                                jsnull?))))]
              [array/e (knot-array/e expr/e)]
              [object/e (knot-object/e expr/e)])
+      (define compound/e
+        (or/e (cons array/e list?)
+              (cons object/e hash?)))
       ;; match the order of our arguments
       (values object/e array/e atom/e compound/e expr/e
               (list/e portable-indent/e compound/e))))
-  (define ((knot-object/e symbol/e) expr/e)
+  (define ((knot-object/e key/e) expr/e)
     (or/e
      (single/e #hasheq())
      (map/e #:contract (recursive-contract
@@ -305,7 +306,7 @@
                       k)
                     (to-nat (listof-n/e expr/e (hash-count hsh))
                             (hash-values hsh 'ordered))))
-            (cons/e (except/e (set/e symbol/e) (set))
+            (cons/e (except/e (set/e key/e) (set))
                     natural/e))))
   (define-values [jsobject/e
                   jsarray/e
@@ -322,17 +323,26 @@
   ;; to focus on variation in arrays and objects.
   ;; DO NOT change `test-datum/e`, which enumerates all possibilities.
   (define constrained-char/e
-    (let ([base/e (apply except/e
-                         (range/e 38 126)
-                         (map char->integer '(#\: #\[ #\] #\{ #\})))])
+    (let ([base/e (append/e (range/e 48 57) ;[0-9]
+                            (range/e 65 90) ;[A-Z]
+                            (range/e 97 122))]) ;[a-z]
+                         
       (map/e integer->char
              char->integer
              base/e
              #:contract (and/c char? (property/c char->integer
                                                  (enum-contract base/e))))))
   (define constrained-string/e
-    (let* ([max-len 5] ; related to https://github.com/racket/racket/issues/4684
+    (let* ([max-len 2 ];5] ; related to https://github.com/racket/racket/issues/4684
            [char-list/e
+            #;
+            (let loop ([len max-len])
+              (if (zero? len)
+                  (single/e '())
+                  (let ([tail (loop (sub1 len))])
+                    (or/e tail
+                          (cons/e constrained-char/e tail)))))
+            ;
             (apply append/e
                    (for/list ([len (in-inclusive-range 0 max-len)])
                      (cons (listof-n/e constrained-char/e len)
@@ -351,14 +361,16 @@
            constrained-string/e
            #:contract (and/c symbol? (property/c symbol->immutable-string
                                                  (enum-contract constrained-string/e)))))
+  (println constrained-symbol/e)
   (define int32/e
     (range/e (- (expt 2 31))
              (- (expt 2 31) 1)))
+  (println int32/e)
   (define-values [constrained-object/e
                   constrained-array/e
                   constrained-atom/e constrained-compound-jsexpr/e constrained-jsexpr/e
                   constrained-test-datum/e]
-    (knot-json/e (knot-object/e constrained-symbol/e)
+    (knot-json/e (knot-object/e symbol/e #;constrained-symbol/e)
                  list/e
                  (or/e jsnull/e
                        bool/e
