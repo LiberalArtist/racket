@@ -56,7 +56,7 @@
                 jsatom/e
                 jsexpr/e]
   (knot-json/e (knot-object/e symbol/e)
-               list/e
+               listof/e
                (or/e jsnull/e
                      bool/e
                      string/e
@@ -114,7 +114,7 @@ int32/e
                 constrained-atom/e
                 constrained-jsexpr/e]
   (knot-json/e (knot-object/e constrained-symbol/e)
-               list/e
+               listof/e
                (or/e jsnull/e
                      bool/e
                      constrained-string/e
