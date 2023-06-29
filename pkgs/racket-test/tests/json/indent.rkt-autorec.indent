@@ -255,7 +255,6 @@
            (all-defined-out))
   (require data/enumerate/lib
            racket/symbol)
-  (define MAX-LENGTH 5)
   (define portable-indent/e ; levels above 10 are not reproducible in JS
     (or/e (single/e #\tab) (except/e (below/e 11) 0)))
   (define (jsnull? x)
@@ -266,6 +265,12 @@
     (and (inexact-real? x) (rational? x)))
   (define inexact-rational/e
     (except/e flonum/e +inf.0 -inf.0 +nan.0 #:contract inexact-rational?))
+  (define jsatom/e
+    (or/e jsnull/e
+          bool/e
+          string/e
+          integer/e
+          inexact-rational/e))
   (define constrained-char/e
     (let ([base/e (append/e (range/e 48 57) ;[0-9]
                             (range/e 65 90) ;[A-Z]
@@ -290,7 +295,7 @@
   (define int32/e
     (range/e (- (expt 2 31))
              (- (expt 2 31) 1)))
-  (define jsatom/e
+  (define constrained-jsatom/e
     (or/e jsnull/e
           bool/e
           constrained-string/e
@@ -299,12 +304,13 @@
   (define jsexpr/e
     (delay/e (or/e (cons jsarray/e list?)
                    (cons jsobject/e hash?)
-                   (cons jsatom/e (λ (x)
+                   (cons constrained-jsatom/e (λ (x)
                                     (or (exact-integer? x)
                                         (inexact-rational? x)
                                         (boolean? x)
                                         (string? x)
                                         (jsnull? x)))))))
+  (define MAX-LENGTH 5)
   (define (setof-n/e e n)
     (cond
       [(zero? n)
@@ -330,38 +336,28 @@
   (define jsobject/e
     (or/e
      (single/e #hasheq())
-     (map/e #:contract (and/c hash? #;(hash/c symbol?
-                                              (recursive-contract (enum-contract jsexpr/e) #:flat)
-                                              #:immutable #t)
-                              hash-eq?
-                              (property/c hash-count (between/c 1 MAX-LENGTH)))
+     (map/e #:contract (recursive-contract
+                        (and/c (hash/c symbol? (enum-contract jsexpr/e) #:immutable #t)
+                               hash-eq?
+                               (property/c hash-count (not/c 0)))
+                        #:flat)
             (match-lambda
-              [(cons _ (cons keys vals))
-               (for/hasheq ([k (in-list (sort (set->list keys) symbol<?))]
-                            [v (in-list vals)])
+              [(cons keys index)
+               (for/hasheq ([k (in-list
+                                (sort (set->list keys) symbol<?))]
+                            [v (in-list
+                                (from-nat (listof-n/e jsexpr/e (set-count keys))
+                                          index))])
                  (values k v))])
             (λ (hsh)
-              (cons (hash-count hsh)
-                    (cons (for/set ([k (in-immutable-hash-keys hsh)])
-                            k)
-                          (hash-values hsh 'ordered))))
-            (cons/de
-             [len (range/e 1 MAX-LENGTH)]
-             [body (len)
-              (cons/e (setof-n/e constrained-symbol/e len)
-                      (listof-n/e jsexpr/e len))]))))
+              (cons (for/set ([k (in-immutable-hash-keys hsh)])
+                      k)
+                    (to-nat (listof-n/e jsexpr/e (hash-count hsh))
+                            (hash-values hsh 'ordered))))
+            (cons/e (except/e (set/e constrained-symbol/e) (set))
+                    natural/e))))
   (define jsarray/e
-    (or/e
-     (single/e '())
-     (map/e #:contract (and/c list? ;(listof (recursive-contract (enum-contract jsexpr/e) #:flat))
-                              (property/c length (between/c 1 MAX-LENGTH)))
-            cdr
-            (λ (lst)
-              (cons (length lst) lst))
-            (cons/de
-             [len (range/e 1 MAX-LENGTH)]
-             [body (len)
-              (listof-n/e jsexpr/e len)]))))
+    (listof/e jsexpr/e))
   (define compound-jsexpr/e
     (or/e (cons jsarray/e list?)
           (cons jsobject/e hash?)))
@@ -375,10 +371,10 @@
     (define (coin-toss)
       (zero? (random 2)))
     (define lst
-      (for/list ([i (in-range (random max-length))])
+      (for/list ([i (in-inclusive-range 0 (random (add1 max-length)))])
         (if (or (zero? max-nesting)
                 (coin-toss))
-            (random-element jsatom/e)
+            (random-element constrained-jsatom/e)
             (random-compound-jsexpr (sub1 max-nesting)))))
     (if (coin-toss)
         lst
