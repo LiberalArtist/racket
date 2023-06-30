@@ -295,72 +295,10 @@
           constrained-string/e
           int32/e
           inexact-rational/e))
-  (define jsexpr/e
-    (delay/e (or/e (cons jsarray/e list?)
-                   (cons jsobject/e hash?)
-                   (cons jsatom/e (λ (x)
-                                    (or (exact-integer? x)
-                                        (inexact-rational? x)
-                                        (boolean? x)
-                                        (string? x)
-                                        (jsnull? x)))))))
-  (define nonempty-keys/e
-    (map/e
-     #:contract (and/c (set/c (enum-contract constrained-symbol/e))
-                       (property/c set-count (between/c 1 MAX-LENGTH)))
-     (λ (lst)
-       (for/set ([nat (in-list lst)])
-         (from-nat constrained-symbol/e nat)))
-     (λ (st)
-       (sort (for/list ([x (in-set st)])
-               (to-nat constrained-symbol/e x))
-             >))
-     (apply or/e
-            (let loop ([n MAX-LENGTH])
-              (if (= 0 n)
-                  null
-                  (let ([smaller (loop (sub1 n))])
-                    (cons (cons (if (= 1 n)
-                                    (list/e natural/e) 
-                                    (cons/de
-                                     [head (tail)
-                                      (nat+/e (add1 (car tail)))]
-                                     [tail (caar smaller)]))
-                                (λ (x)
-                                  (and (list? x) (= n (length x)))))
-                          smaller)))))))
-  (define jsobject/e
-    (or/e
-     (single/e #hasheq())
-     (map/e #:contract (and/c (hash/c symbol?
-                                      (recursive-contract (enum-contract jsexpr/e) #:flat)
-                                      #:immutable #t)
-                              hash-eq?
-                              (property/c hash-count (between/c 1 MAX-LENGTH)))
-            (match-lambda
-              [(cons keys vals)
-               (for/hasheq ([k (in-list (sort (set->list keys) symbol<?))]
-                            [v (in-list vals)])
-                 (values k v))])
-            (λ (hsh)
-              (cons (for/set ([k (in-immutable-hash-keys hsh)])
-                      k)
-                    (hash-values hsh 'ordered)))
-            (cons/de
-             [keys nonempty-keys/e]
-             [vals (keys) (listof-n/e jsexpr/e (set-count keys))]))))
-  (define jsarray/e
-    (listof/e jsexpr/e))
-  (define compound-jsexpr/e
-    (or/e (cons jsarray/e list?)
-          (cons jsobject/e hash?)))
-  (define test-datum/e
-    (list/e portable-indent/e compound-jsexpr/e))
-  ;;;;;;;;;
   (define (random-element e)
     (from-nat e (random-index e)))
   (define (random-compound-jsexpr [max-nesting 8])
-    (define max-length 5)
+    (define max-length MAX-LENGTH)
     (define (coin-toss)
       (zero? (random 2)))
     (define lst
@@ -377,26 +315,7 @@
             (define key (random-element constrained-symbol/e))
             (if (hash-has-key? hsh key)
                 (retry)
-                (hash-set hsh key rhs))))))
-  ;;
-  (define indent-order/e
-    (let ([nats/e (permutations-of-n/e (enum-count portable-indent/e))])
-      (define ((convert-all convert) lst)
-        (map (λ (x)
-               (convert portable-indent/e x))
-             lst))
-      (map/e #:contract (and/c
-                         (listof (enum-contract portable-indent/e))
-                         (property/c length (enum-count portable-indent/e))
-                         (flat-named-contract 'no-duplicates?
-                                              (λ (lst)
-                                                (not (check-duplicates lst eqv?)))))
-             (convert-all from-nat)
-             (convert-all to-nat)
-             nats/e)))
-  (define (in-indent-order-cycle [which (random-index indent-order/e)])
-    (in-cycle (from-nat indent-order/e which))))
-
+                (hash-set hsh key rhs)))))))
 ;; ---------------------------------------------------------------------------------
 (module dynamic-enum racket
   (require syntax/modresolve
@@ -411,12 +330,7 @@
                  (dynamic-require enum-mpi sym)
                  (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
            (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
-  (define/provide
-    test-datum/e
-    random-compound-jsexpr
-    in-indent-order-cycle
-    to-nat
-    from-nat))
+  (define/provide random-compound-jsexpr))
 
 ;
 ;
@@ -551,10 +465,8 @@
          rackunit)
 (void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
 
-(define (datum-from-nat n)
-  (from-nat test-datum/e n))
 (define (dir-for-nat n)
-  (build-path indent-test-data/ (number->string n 16)))
+  (build-path indent-test-data/ (number->string n)))
 
 (define (pretty-write-to-file x pth)
   (call-with-output-file* pth
@@ -566,8 +478,8 @@
   (let ()
     (define (rm-f pth)
       (delete-directory/files pth #:must-exist? #f))
-    (define (run-writer name proc nat #:exists [exists 'error])
-      (parameterize ([current-directory (dir-for-nat nat)])
+    (define (run-writer name proc datum dir #:exists [exists 'error])
+      (parameterize ([current-directory dir])
         (define json-pth (string-append name ".json"))
         (define rktd-pth (string-append "args." name ".rktd"))
         (when (eq? exists 'redo)
@@ -577,7 +489,7 @@
           (rm-f rktd-pth)
           (pretty-write-to-file (with-output-to-file json-pth
                                   (λ ()
-                                    (apply proc (datum-from-nat nat))))
+                                    (apply proc datum)))
                                 rktd-pth))))
     (define (node-write-for-nat nat)
       (run-writer "node" node-write-json nat))
