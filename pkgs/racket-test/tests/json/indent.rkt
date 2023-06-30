@@ -3,9 +3,18 @@
 ;; This files assumes `(eq? 'null (json-null))`.
 
 (module data racket/base
-  (require racket/runtime-path)
+  (require racket/runtime-path
+           json
+           racket/list
+           racket/contract)
   (define-runtime-path indent-test-data/
     "indent-test-data/")
+  (define portable-indent-values
+    (cons #\tab (inclusive-range 1 10)))
+  (define portable-indent/c
+    (or/c #\tab (integer-in 1 10)))
+  (define test-datum/c
+    (list/c portable-indent/c (and/c jsexpr? (or/c hash? list?))))
   (provide (all-defined-out)))
 (require 'data
          "../../../../racket/collects/json/main.rkt")
@@ -13,7 +22,7 @@
 ;;
 ;;    WRITE TESTS HERE
 ;;
-#;
+
 (module* cli racket
   ;; In a shell, source `alias.sh` in this directory to be able to run `indent-test-data-cli`.
   (module* main #f
@@ -26,8 +35,10 @@
      "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
      "┃   Actions"
      "┃ First"
-     #:multi [("--add-from-nat" "-n") N "Add <N>th test datum from enumeration."
-              (--add-from-nat N)]
+     #:multi [("--add-from-file" "-f") datum.rktd "Add test datum read from <datum.rktd>."
+              (--add-from-file datum.rktd)]
+     #:multi [("--add-s-exp" "-s") S-expression "Add test datum read from <S-expression>."
+              (--add-from-file (read (open-input-string S-expression)))]
      #:help-labels
      "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
      "┃ Second"
@@ -41,21 +52,25 @@
                                            "It instead tests the INPUT to those tests.")
                   (--validate-all #t)]
      #:multi [("--validate" "-v")
-              N ("Validate <N>th previously added test datum."
-                 "(If combined with `--validate-all`, has no additional effect.)"
-                 "Data added by `--add-from-nat` and `--add-random` are always validated.")
-              (--validate N)]
+              dir ("Validate previously added test from `$indent-test-data/dir`."
+                   "(If combined with `--validate-all`, has no additional effect.)"
+                   "Data added by `--add-from-nat` and `--add-random` are always validated.")
+              (--validate dir)]
      #:help-labels
      "    ──────────────────────────────────────────────"
      #:once-each [("--redo-python" "-p" ) "When validating, replace `python.json` files."
                   (--redo-python #t)]
      #:help-labels
      "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+     #:once-each [("--realpath") "Print `$indent-test-data/`, followed by a newline, and exit."
+                  (write-bytes (path->bytes indent-test-data/))
+                  (newline)
+                  (exit 0)]
      #:args ()
      (indent-test-data-cli)))
 
   (provide indent-test-data-cli
-           --add-from-nat
+           --add-from-file
            --add-random
            --validate-all
            --validate
@@ -87,7 +102,7 @@
 
 
   (require (for-syntax racket/syntax)
-           (submod ".." dynamic-enum)
+           (submod ".." data)
            (submod ".." #;generate-and-validate)
            syntax/parse/define)
   
@@ -121,9 +136,9 @@
     (case-lambda
       [(name) ; This is a boolean switch: nothing to parse.
        (make-parameter #f (λ (x) (and x #t)) name)]
-      [(name parsed-arg-ok? init)
+      [(name parse-arg parsed-arg-ok? init)
        (define (parse-string str)
-         (define n (string->number str))
+         (define n (parse-arg str))
          (unless (parsed-arg-ok? n)
            (raise-arguments-error 'indent-test-data-cli
                                   "bad argument to switch"
@@ -138,8 +153,8 @@
        (define guard
          (cond
            [(null? init) ; List parameter: replace list or cons on new value.
-            (λ (x)      #; (this atom) #|is short for|# #;(this (cons (parse-new atom) (this)))
-              (if (list? x)
+            (λ (x)       #; (this atom) #|is short for|# #;(this (cons (parse-new atom) (this)))
+              (if (null? x)
                   x
                   (cons (parse-new x) (this))))]
            [else
@@ -167,7 +182,12 @@
                           (~optional (~seq (~optional (~and #:multi multi?))
                                            (~var parsed-cli-arg/c-expr
                                                  (expr/c #'flat-contract?
-                                                         #:name "cli contract expression")))))))
+                                                         #:name "cli contract expression"))
+                                           (~optional
+                                            (~seq #:parse
+                                                  (~var parse-arg-expr
+                                                        (expr/c #'(-> string? any/c)
+                                                                #:name "#:parse expression")))))))))
         #:attr parsed-cli-arg/c (and (attribute parsed-cli-arg/c-expr.c)
                                      (format-id #'foo "~a/parsed/c" #'--name))
         #:attr fun-arg/c #`(~? (~? (and 'multi? (listof parsed-cli-arg/c))
@@ -178,7 +198,9 @@
                                         #:name "flag parameter"))
         (quasisyntax/loc #'--name
           (make-flag-parameter '--name
-                               (~? (~@ parsed-cli-arg/c (~? (and 'multi? null) #f)))))
+                               (~? (~@ (~? parse-arg-expr.c string->number)
+                                       parsed-cli-arg/c
+                                       (~? (and 'multi? null) #f)))))
         #:attr init-expr #`(~? custom-init-expr (--name))
         #:attr definitions #`(begin
                                (~? (define parsed-cli-arg/c parsed-cli-arg/c-expr.c))
@@ -195,30 +217,26 @@
     (begin arg.definitions ...
            (define name lambda-expr.c)))
 
-
   (define-main (indent-test-data-cli
-                #:add-from-nat to-add --add-from-nat #:multi natural-number/c
+                #:add to-add --add-from-file #:multi test-datum/c #:parse file->value
                 #:add-random num-random-to-add --add-random exact-positive-integer?
                 #:redo-python? redo-python? --redo-python
-                #:validate to-validate --validate #:multi natural-number/c
+                #:validate to-validate --validate #:multi path-string? #:parse values
                 #:validate-all? [validate-all? (or (--validate-all)
                                                    (and (null? to-validate)
                                                         (null? to-add)
                                                         (not num-random-to-add)))]
                 --validate-all)
-    (for-each add-from-nat to-add)
+    (for-each add to-add)
     (when num-random-to-add
       (define done (add-random num-random-to-add #:redo-python? redo-python?))
       (for-each display
                 (if (= 1 num-random-to-add)
-                    @list{Added data in randomly chosen directory "@car[done]/".@"\n"}
-                    (cons "Added data in these randomly-chosen directories:\n  "
+                    @list{Added randomly-chosen data in directory "@car[done]/".@"\n"}
+                    (cons "Added randomly-chosen data in these directories:\n  "
                           (add-between done "/\n  " #:after-last '("/\n"))))))
     (cond
-      [(or validate-all?
-           (and (null? to-validate)
-                (null? to-add)
-                (not num-random-to-add)))
+      [validate-all?
        (validate-all #:redo-python? redo-python?)]
       [else
        (validate-list #:redo-python? redo-python? to-validate)])))
@@ -248,90 +266,76 @@
 ;
 
 
-
-
-;(module enum racket
-;  (provide (all-from-out data/enumerate/lib)
-;           (all-defined-out))
-(require data/enumerate/lib
+(require math/base
+         math/flonum
          racket/symbol)
-(define MAX-LENGTH 5)
-(define portable-indent/e ; levels above 10 are not reproducible in JS
-  (or/e (single/e #\tab) (range/e 1 10)))
-(define (jsnull? x)
-  (eq? x 'null))
-(define jsnull/e
-  (single/e 'null #:equal? eq?))
-(define (inexact-rational? x) ; not nan or inf
-  (and (inexact-real? x) (rational? x)))
-(define inexact-rational/e
-  (except/e flonum/e +inf.0 -inf.0 +nan.0 #:contract inexact-rational?))
-(define constrained-char/e
-  (let ([base/e (append/e (range/e 65 90) ;[A-Z]
-                          (range/e 97 122))]) ;[a-z]
-    (map/e integer->char
-           char->integer
-           #:contract (and/c char? (property/c char->integer
-                                               (enum-contract base/e)))
-           base/e)))
-(define constrained-string/e
-  (map/e list->string
-         string->list
-         #:contract (and/c string? (property/c string->list
-                                               (listof (enum-contract constrained-char/e))))
-         (listof/e constrained-char/e)))
-(define constrained-symbol/e
-  (map/e string->symbol
-         symbol->immutable-string
-         #:contract (and/c symbol? (property/c symbol->immutable-string
-                                               (enum-contract constrained-string/e)))
-         constrained-string/e))
-(define int32/e
-  (range/e (- (expt 2 31))
-           (- (expt 2 31) 1)))
-(define jsatom/e
-  (or/e jsnull/e
-        bool/e
-        constrained-string/e
-        int32/e
-        inexact-rational/e))
-(define (random-element e)
-  (from-nat e (random-index e)))
+
+(define (coin-toss)
+  (zero? (random 2)))
+
+(define vocab
+  #(Age Air Art Bean Bell Big Bird Boat Book Cake Cat Cup Day Dog Dry Ear Ever Eye Face Few Fish
+Game Gift Hat Hen Hot How Ice Key Kind Leaf Love Low Map May Moon Net New Old Path Put Rain Read
+Run Safe Say Ship Sky Sun Swim Talk Tea Tidy Toe Town Use Very Wait Walk Warm Wet Who Why Win
+Wise Wish Yard Yet Zoo))
+(define (random-words [n #f])
+  (for/list ([__ (in-range (or n (add1 (modulo (random 19) 12))))])
+    (vector-ref vocab (random (vector-length vocab)))))
+(define (random-string [n #f])
+  (match (random-words)
+    [(list sym)
+     (symbol->immutable-string sym)]
+    [lst
+     (string-append* (map symbol->immutable-string lst))]))
+(define (random-symbol [n #f])
+  (match (random-words)
+    [(list sym)
+     sym]
+    [lst
+     (string->symbol (string-append* (map symbol->immutable-string lst)))]))
+
+(define (random-int32)
+  (- (random-bits 32)
+     (expt 2 31)))
+
+(define (random-inexact-rational)
+  (let* ([x (if (coin-toss)
+                (exact->inexact (random-bits 24))
+                (* (random) (expt 10 (random 8))))]
+         [x (if (coin-toss)
+                x
+                (- x))]
+         [x (flsingle x)])
+    (if (rational? x)
+        x
+        (random-inexact-rational))))
+
+(define (random-atomic-jsexpr)
+  (match (random 6)
+    [0 (random-string)]
+    [1 (random-int32)]
+    [2 (random-inexact-rational)]
+    [3 'null]
+    [4 #f]
+    [5 #t]))
+
 (define (random-compound-jsexpr [max-nesting 8])
-  (define max-length MAX-LENGTH)
-  (define (coin-toss)
-    (zero? (random 2)))
+  (define max-length 5)
   (define lst
     (for/list ([i (in-range (random max-length))])
       (if (or (zero? max-nesting)
               (coin-toss))
-          (random-element jsatom/e)
+          (random-atomic-jsexpr)
           (random-compound-jsexpr (sub1 max-nesting)))))
   (if (coin-toss)
       lst
       (for/fold ([hsh #hasheq()])
                 ([rhs (in-list lst)])
         (let retry ()
-          (define key (random-element constrained-symbol/e))
+          (define key (random-symbol))
           (if (hash-has-key? hsh key)
               (retry)
               (hash-set hsh key rhs))))));)
-;; ---------------------------------------------------------------------------------
-#;
-(module dynamic-enum racket
-  (require syntax/modresolve
-           (for-syntax racket/base syntax/transformer))
-  (define enum-mpi
-    (module-path-index-join '(submod ".." enum) (variable-reference->module-path-index
-                                                 (#%variable-reference))))
-  (define-syntax-rule (define/provide id ...)
-    (begin (provide id ...)
-           (define (get sym)
-             (if (module-declared? enum-mpi 'load)
-                 (dynamic-require enum-mpi sym)
-                 (error "FATAL ERROR: you need to un-comment" (resolve-module-path-index enum-mpi))))
-           (define-syntax id (make-variable-like-transformer #'(get 'id))) ...))
-  (define/provide random-compound-jsexpr))
 
 ;
 ;
@@ -357,7 +361,6 @@
 ;           ;;;
 ;
 
-#;
 (module system racket
   (provide node-write-json
            python-write-json)
@@ -453,127 +456,106 @@
 ;   ;    ;;
 ;    ;;;;;
 ;
-#;{
- ;(module generate-and-validate racket/base
- (provide add-from-nat
-          add-random
-          validate
-          validate-list
-          validate-all)
 
- (require 'dynamic-enum
-          'system
-          rackunit)
- (void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
+;(module generate-and-validate racket/base
 
- (define (dir-for-nat n)
-   (build-path indent-test-data/ (number->string n)))
+(provide add
+         add-random
+         validate
+         validate-list
+         validate-all)
 
- (define (pretty-write-to-file x pth)
-   (call-with-output-file* pth
-     (λ (out)
-       (pretty-write x out))))
+(require ;'dynamic-enum
+  'system
+  (only-in file/sha1 bytes->hex-string)
+  rackunit)
+(void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
 
- (define-values [node-write-to-dir
-                 python-write-to-dir]
-   (let ()
-     (define (rm-f pth)
-       (delete-directory/files pth #:must-exist? #f))
-     (define (run-writer name proc datum dir #:exists [exists 'error])
-       (parameterize ([current-directory dir])
-         (define json-pth (string-append name ".json"))
-         (define rktd-pth (string-append "args." name ".rktd"))
-         (when (eq? exists 'redo)
-           (for-each rm-f (list json-pth rktd-pth)))
-         (unless (and (eq? exists 'ignore)
-                      (file-exists? json-pth))
-           (rm-f rktd-pth)
-           (pretty-write-to-file (with-output-to-file json-pth
-                                   (λ ()
-                                     (apply proc datum)))
-                                 rktd-pth))))
-     (define (node-write-to-dir datum dir)
-       (run-writer "node" node-write-json datum dir))
-     (define (python-write-for-nat datum dir #:redo-python? [redo-python? #f])
-       (run-writer "python" python-write-json datum dir #:exists (if redo-python?
-                                                                     'redo
-                                                                     'ignore)))
-     (values node-write-to-dir
-             python-write-to-dir)))
+(define (file->short-hash pth)
+  (substring (bytes->hex-string (call-with-input-file* pth
+                                  sha256-bytes))
+             0 7))
 
- (define (add-from-nat nat)
-   (define dir (dir-for-nat nat))
-   (make-directory dir)
-   (pretty-write-to-file (datum-from-nat nat)
-                         (build-path dir "datum.rktd"))
-   (node-write-for-nat nat)
-   (validate nat))
 
- (define (file->jsexpr pth)
-   (string->jsexpr ; ensure whole file is consumed
-    (file->string pth)))
+(define (pretty-write-to-file x pth)
+  (call-with-output-file* pth
+    (λ (out)
+      (pretty-write x out))))
 
- (define (validate nat #:redo-python? [redo-python? #f])
-   (parameterize ([current-directory (dir-for-nat nat)])
-     (python-write-for-nat nat #:redo-python? redo-python?)
-     (match-define (and datum (list indent jsexpr))
-       (datum-from-nat nat))
-     (test-case
-      (string-append (number->string nat) "/")
-      (test-equal? "datum.rktd contains correct value"
-                   (file->value "datum.rktd")
-                   datum)
-      (test-equal? "node.json contains correct value"
-                   (file->jsexpr "node.json")
-                   jsexpr)
-      (test-equal? "python.json is identical to node.json"
-                   (file->string "python.json")
-                   (file->string "node.json")))))
+(define-values [node-write-datum
+                python-write-datum]
+  (let ()
+    (define (rm-f pth)
+      (delete-directory/files pth #:must-exist? #f))
+    (define (run-writer name proc datum #:exists [exists 'error])
+      (define json-pth (string-append name ".json"))
+      (define rktd-pth (string-append "args." name ".rktd"))
+      (when (eq? exists 'redo)
+        (for-each rm-f (list json-pth rktd-pth)))
+      (unless (and (eq? exists 'ignore)
+                   (file-exists? json-pth))
+        (rm-f rktd-pth)
+        (pretty-write-to-file (with-output-to-file json-pth
+                                (λ ()
+                                  (apply proc datum)))
+                              rktd-pth)))
+    (define (node-write-datum datum)
+      (run-writer "node" node-write-json datum))
+    (define (python-write-datum datum #:redo-python? [redo-python? #f])
+      (run-writer "python" python-write-json datum #:exists (if redo-python?
+                                                                    'redo
+                                                                    'ignore)))
+    (values node-write-datum
+            python-write-datum)))
 
- (define (validate-list nats #:redo-python? [redo-python? #f])
-   (for-each (λ (n)
-               (validate n #:redo-python? redo-python?))
-             nats))
+(define (add datum)
+  (define incoming
+    (make-temporary-directory #:base-dir indent-test-data/))
+  (define dir
+    (parameterize ([current-directory incoming])
+      (pretty-write-to-file datum "datum.rktd")
+      (node-write-datum datum)
+      (file->short-hash "datum.rktd")))
+  (rename-file-or-directory incoming (build-path indent-test-data/ dir))
+  (validate dir))
 
- (define (validate-all #:redo-python? [redo-python? #f])
-   (validate-list #:redo-python? redo-python?
-                  (parameterize ([current-directory indent-test-data/])
-                    (for/list ([pth (in-list (directory-list))]
-                               #:when (directory-exists? pth))
-                      (string->number (path->string pth))))))
+(define (file->jsexpr pth)
+  (string->jsexpr ; ensure whole file is consumed
+   (file->string pth)))
 
- (define (add-random num-random-to-add #:redo-python? [redo-python? #f])
-   (for/list ([i (in-inclusive-range 1 num-random-to-add)]
-              [indent (in-indent-order-cycle)])
-     ;; Use all indentations as equally with as possible,
-     ;; with a random selection for the remainder.
-     (let retry ()
-       (define jsexpr (random-compound-jsexpr))
-       (define nat (to-nat test-datum/e (list indent jsexpr)))
-       (cond
-         [(directory-exists? (dir-for-nat nat))
-          (for-each display
-                    `@{
-           Encountered previously added datum @,nat while adding @;
-           @,@(if (= 1 num-random-to-add)
-                  '@{a}
-                  @list{the @n->th[i] of @|num-random-to-add|}) @;
-           randomly chosen @,(if (= 1 num-random-to-add)
-                                 "datum"
-                                 "data").
-           Validating it before moving on.@"\n"})
-          (validate nat #:redo-python? redo-python?)
-          (retry)]
-         [else
-          (add-from-nat nat)
-          nat]))))
- #|
- > (add-random 1)
- '(8)
- > (add-random 1)
- make-directory: cannot make directory
- path: /home/philip/code/21.10-bastet/tmp/racket/pkgs/racket-test/tests/json/indent-test-data/1159095743630242463503902360465296914727929856602061634773857791147331130940696236210595899834928447921078949166179263610023481639037797778918787178285142010019091718315168946228794182868151496416393469376567444509680442144390298620278835213345919107890394213820441789001968926237877019365606893543187487782730092171122905432869687710368670434619592698512247149708884930233546024012680438385361147721567478441078851
- system error: File name too long; errno=36
- /home/philip/code/21.10-bastet/tmp/racket/pkgs/racket-test/tests/json/indent-test-data/88973281688915745539980356488217840928481594244372283878585184173890957078970022600659843539861661687861990345501384467626159840564319553213797070849535033614426026293283981054678349563970947732021792445995158152615311394680347252436029167926466071154034089127629290136545386580358166404587226508639012541172985556475060963224794099198708525295262982770203821412822982808321318156300567361571655764989747405381333492239022963652170025302934686561076578459706585736210101512740716295558643581175127387863106364057718698447973955271501989422101779342035678271082107868774559141976969950411257513605371693249450902412364453748127576110534279288654268234846021880950240263806872853479721881987993528725898845974892512340223328427342280622444726051260867452523898207920153090418508679131870946181146215562005441345521758893781808606967686516277976969989628401296574232996986817477299170691260502084834927900225424390404730715394645390203888580495380373336911293181166912056472671898357003495251238428468667088090330308555692675527421549701796578993957608005157510293656441559372809764867039728585682671033974795014190634851833648627139282424331157993877561073522700220158111106968341910460440673308444292141037359333922659712572104464280215672314871871913581488125521723967243849163451022950111064477959896379738577169632760052788374479394244675647684106356651674482840080030975083469668683075124366271415745602976061038558177041512959464177752668152651394472660957607591484248732971280475847682528231390097502251168734099863811711077487476390119403870094425778859548656232677266570788767359328462834816283066988810646674139829950912716745736257327165794567049278016573401724226613968065031320188090321505911020850152339656115841816056779446401542527127834718336312127356837133821618317490217387873378526675976345001735042548260468572773112697823771687336691437600644015667034876909242943631028773717889962818516164286248408517623793953472247973274624423995042785248375824417450389503754937787775587880951491349067728294090940040356908965883452744023855501771299190372312990912748850137009809095674097277680484722574177166164753914813077949226836062432098263324624820268763599597148
- |#
-}
+(define (validate dir #:redo-python? [redo-python? #f])
+  (parameterize ([current-directory (build-path indent-test-data/ dir)])
+    (match-define (and datum (list indent jsexpr))
+      (file->value "datum.rktd"))
+    (python-write-datum datum #:redo-python? redo-python?)
+    (test-case
+     (string-append dir "/")
+     (test-equal? "datum.rktd contains correct value"
+                  (file->short-hash "datum.rktd")
+                  dir)
+     (test-equal? "node.json contains correct value"
+                  (file->jsexpr "node.json")
+                  jsexpr)
+     (test-equal? "python.json is identical to node.json"
+                  (file->string "python.json")
+                  (file->string "node.json")))
+    dir))
+
+(define (validate-list dirs #:redo-python? [redo-python? #f])
+  (for-each (λ (dir)
+              (validate dir #:redo-python? redo-python?))
+            dirs))
+
+(define (validate-all #:redo-python? [redo-python? #f])
+  (validate-list #:redo-python? redo-python?
+                 (parameterize ([current-directory indent-test-data/])
+                   (for/list ([pth (in-list (directory-list))]
+                              #:when (directory-exists? pth))
+                     (path->string pth)))))
+
+(define (add-random num-random-to-add #:redo-python? [redo-python? #f])
+  (for/list ([i (in-inclusive-range 1 num-random-to-add)]
+             [indent (in-cycle (shuffle portable-indent-values))])
+    ;; Use all indentations as equally with as possible,
+    ;; with a random selection for the remainder.
+    (add (list indent (random-compound-jsexpr)))))
