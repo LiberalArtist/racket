@@ -2,6 +2,9 @@
 
 ;; This files assumes `(eq? 'null (json-null))`.
 
+(module+ test
+  (run-tests json-indent-tests))
+
 (module data racket/base
   (require racket/runtime-path
            json
@@ -19,11 +22,26 @@
     (list/c portable-indent/c compound-jsexpr/c))
   (provide (all-defined-out)))
 (require 'data
+         rackunit
+         rackunit/text-ui
          "../../../../racket/collects/json/main.rkt")
 
-;;
-;;    WRITE TESTS HERE
-;;
+(define json-indent-tests
+  (make-test-suite
+   "json #:indent tests"
+   (for*/list ([dir (in-list (directory-list indent-test-data/))]
+               [abs (in-value (build-path indent-test-data/ dir))]
+               #:when (directory-exists? abs))
+     (test-suite
+      (path->string dir)
+     (parameterize ([current-directory abs])
+       (match-define (and datum (list indent jsexpr))
+         (file->value "datum.rktd"))
+       (check-equal? (jsexpr->string #:indent indent jsexpr)
+                     (let ([str (file->string "node.json")])
+                       ;; remove trailing newline we added
+                       (substring str 0 (sub1 (string-length str))))
+                     "indentation should match"))))))
 
 (module* cli racket/base
   ;; In a shell, source `alias.sh` in this directory to be able to run `indent-test-data-cli`.
