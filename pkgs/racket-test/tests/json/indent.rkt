@@ -13,8 +13,10 @@
     (cons #\tab (inclusive-range 1 10)))
   (define portable-indent/c
     (or/c #\tab (integer-in 1 10)))
+  (define compound-jsexpr/c
+    (and/c jsexpr? (or/c hash? list?)))
   (define test-datum/c
-    (list/c portable-indent/c (and/c jsexpr? (or/c hash? list?))))
+    (list/c portable-indent/c compound-jsexpr/c))
   (provide (all-defined-out)))
 (require 'data
          "../../../../racket/collects/json/main.rkt")
@@ -23,7 +25,7 @@
 ;;    WRITE TESTS HERE
 ;;
 
-(module* cli racket
+(module* cli racket/base
   ;; In a shell, source `alias.sh` in this directory to be able to run `indent-test-data-cli`.
   (module* main #f
     (require racket/cmdline)
@@ -62,7 +64,7 @@
                   (--redo-python #t)]
      #:help-labels
      "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-     #:once-each [("--realpath") "Print `$indent-test-data/`, followed by a newline, and exit."
+     #:once-each [("--realpath") "Print `$indent-test-data/`, followed by a newline, and exit"
                   (write-bytes (path->bytes indent-test-data/))
                   (newline)
                   (exit 0)]
@@ -101,10 +103,14 @@
   ;
 
 
-  (require (for-syntax racket/syntax)
+  (require (for-syntax racket/base
+                       racket/syntax)
+           syntax/parse/define
+           racket/contract
+           racket/file
+           racket/list
            (submod ".." data)
-           (submod ".." #;generate-and-validate)
-           syntax/parse/define)
+           (submod ".." add-validate))
   
 
 
@@ -229,7 +235,7 @@
                 --validate-all)
     (for-each add to-add)
     (when num-random-to-add
-      (define done (add-random num-random-to-add #:redo-python? redo-python?))
+      (define done (add-random num-random-to-add))
       (for-each display
                 (if (= 1 num-random-to-add)
                     @list{Added randomly-chosen data in directory "@car[done]/".@"\n"}
@@ -239,103 +245,7 @@
       [validate-all?
        (validate-all #:redo-python? redo-python?)]
       [else
-       (validate-list #:redo-python? redo-python? to-validate)])))
-
-;
-;
-;
-;
-;
-;
-;
-;
-;
-;    ;;;;    ;; ;;;   ;;   ;;  ;;;;;; ;;;
-;   ;;   ;   ;;;  ;   ;;   ;;  ;;  ;;;  ;;
-;   ;    ;;  ;;   ;;  ;;   ;;  ;;   ;;   ;
-;   ;    ;;  ;;   ;;  ;;   ;;  ;;   ;;   ;
-;   ;;;;;;;  ;;   ;;  ;;   ;;  ;;   ;;   ;
-;   ;        ;;   ;;  ;;   ;;  ;;   ;;   ;
-;   ;        ;;   ;;  ;;   ;;  ;;   ;;   ;
-;   ;;   ;   ;;   ;;   ;  ;;;  ;;   ;;   ;
-;    ;;;;    ;;   ;;   ;;; ;;  ;;   ;;   ;
-;
-;
-;
-;
-;
-
-
-(require math/base
-         math/flonum
-         racket/symbol)
-
-(define (coin-toss)
-  (zero? (random 2)))
-
-(define vocab
-  #(Age Air Art Bean Bell Big Bird Boat Book Cake Cat Cup Day Dog Dry Ear Ever Eye Face Few Fish
-Game Gift Hat Hen Hot How Ice Key Kind Leaf Love Low Map May Moon Net New Old Path Put Rain Read
-Run Safe Say Ship Sky Sun Swim Talk Tea Tidy Toe Town Use Very Wait Walk Warm Wet Who Why Win
-Wise Wish Yard Yet Zoo))
-(define (random-words [n #f])
-  (for/list ([__ (in-range (or n (add1 (modulo (random 19) 12))))])
-    (vector-ref vocab (random (vector-length vocab)))))
-(define (random-string [n #f])
-  (match (random-words)
-    [(list sym)
-     (symbol->immutable-string sym)]
-    [lst
-     (string-append* (map symbol->immutable-string lst))]))
-(define (random-symbol [n #f])
-  (match (random-words)
-    [(list sym)
-     sym]
-    [lst
-     (string->symbol (string-append* (map symbol->immutable-string lst)))]))
-
-(define (random-int32)
-  (- (random-bits 32)
-     (expt 2 31)))
-
-(define (random-inexact-rational)
-  (let* ([x (if (coin-toss)
-                (exact->inexact (random-bits 24))
-                (* (random) (expt 10 (random 8))))]
-         [x (if (coin-toss)
-                x
-                (- x))]
-         [x (flsingle x)])
-    (if (rational? x)
-        x
-        (random-inexact-rational))))
-
-(define (random-atomic-jsexpr)
-  (match (random 6)
-    [0 (random-string)]
-    [1 (random-int32)]
-    [2 (random-inexact-rational)]
-    [3 'null]
-    [4 #f]
-    [5 #t]))
-
-(define (random-compound-jsexpr [max-nesting 8])
-  (define max-length 5)
-  (define lst
-    (for/list ([i (in-range (random max-length))])
-      (if (or (zero? max-nesting)
-              (coin-toss))
-          (random-atomic-jsexpr)
-          (random-compound-jsexpr (sub1 max-nesting)))))
-  (if (coin-toss)
-      lst
-      (for/fold ([hsh #hasheq()])
-                ([rhs (in-list lst)])
-        (let retry ()
-          (define key (random-symbol))
-          (if (hash-has-key? hsh key)
-              (retry)
-              (hash-set hsh key rhs))))));)
+       (validate-list to-validate #:redo-python? redo-python?)])))
 
 ;
 ;
@@ -361,19 +271,25 @@ Wise Wish Yard Yet Zoo))
 ;           ;;;
 ;
 
-(module system racket
-  (provide node-write-json
-           python-write-json)
-  (require json)
-  (define portable-indent/c ; <--------------------------- Should this live here?
-    (or/c #\tab (integer-in 1 10)))
+(module system racket/base
+  (require json
+           racket/contract
+           racket/list
+           racket/string
+           racket/system
+           (submod ".." data))
+  (provide (contract-out
+            [node-write-json
+             (-> portable-indent/c compound-jsexpr/c any)]
+            [python-write-json
+             (-> portable-indent/c compound-jsexpr/c any)]))
   (define/contract ((make-runner name #:try-first [try-first #f]
                                  make-args)
                     indent js)
     (->* [string?
           (-> string? string? (listof string?))]
          [#:try-first (or/c #f string?)]
-         (-> portable-indent/c jsexpr? any))
+         (-> portable-indent/c compound-jsexpr/c any))
     (define args
       (make-args
        (if (eqv? #\tab indent)
@@ -433,129 +349,249 @@ Wise Wish Yard Yet Zoo))
 }
              json)))))
 
-;
-;
-;
-;
-;
-;
-;
-;                                                     ;
-;        ;;                                           ;
-;    ;;;;    ;;;;    ;; ;;;    ;;;;    ;; ;   ;;;;  ;;;;;   ;;;;
-;   ;;  ;;  ;;   ;   ;;;  ;   ;;   ;   ;;;   ;;  ;;   ;    ;;   ;
-;   ;    ;  ;    ;;  ;;   ;;  ;    ;;  ;;         ;   ;    ;    ;;
-;   ;    ;  ;    ;;  ;;   ;;  ;    ;;  ;;         ;   ;    ;    ;;
-;   ;;   ;  ;;;;;;;  ;;   ;;  ;;;;;;;  ;;     ;;;;;   ;    ;;;;;;;
-;    ;;;;   ;        ;;   ;;  ;        ;;    ;    ;   ;    ;
-;    ;      ;        ;;   ;;  ;        ;;    ;    ;   ;    ;
-;   ;       ;;   ;   ;;   ;;  ;;   ;   ;;    ;  ;;;   ;    ;;   ;
-;   ;;;;;;   ;;;;    ;;   ;;   ;;;;    ;;    ;;;; ;;  ;;;   ;;;;
-;   ;    ;;
-;   ;     ;
-;   ;    ;;
-;    ;;;;;
-;
 
-;(module generate-and-validate racket/base
+;                                                         
+;                                                         
+;                                                         
+;                                                         
+;                                                         
+;                               ;;                        
+;                               ;;                        
+;                               ;;                        
+;                               ;;                        
+;   ;; ;   ;;;;   ;; ;;;    ;;;;;;   ;;;;    ;;;;;; ;;;   
+;   ;;;   ;;  ;;  ;;;  ;   ;;   ;;  ;;   ;   ;;  ;;;  ;;  
+;   ;;         ;  ;;   ;;  ;    ;;  ;    ;;  ;;   ;;   ;  
+;   ;;         ;  ;;   ;;  ;    ;;  ;     ;  ;;   ;;   ;  
+;   ;;     ;;;;;  ;;   ;;  ;    ;;  ;     ;  ;;   ;;   ;  
+;   ;;    ;    ;  ;;   ;;  ;    ;;  ;     ;  ;;   ;;   ;  
+;   ;;    ;    ;  ;;   ;;  ;    ;;  ;    ;;  ;;   ;;   ;  
+;   ;;    ;  ;;;  ;;   ;;  ;;   ;;  ;;   ;   ;;   ;;   ;  
+;   ;;    ;;;; ;; ;;   ;;   ;;;;;;   ;;;;    ;;   ;;   ;  
+;                                                         
+;                                                         
+;                                                         
+;                                                         
+;                                                         
 
-(provide add
-         add-random
-         validate
-         validate-list
-         validate-all)
+(module random racket/base
+  (require math/base
+           racket/contract
+           racket/flonum
+           racket/match
+           racket/string
+           racket/symbol
+           (submod ".." data))
+  (provide (contract-out
+            [random-compound-jsexpr
+             (-> compound-jsexpr/c)]))
 
-(require ;'dynamic-enum
-  'system
-  (only-in file/sha1 bytes->hex-string)
-  rackunit)
-(void (putenv "NODE" "/gnu/store/ljcqb9w28xsqgd992gxm33xz7s3x190v-node-14.19.3/bin/node"))
+  (define (coin-toss)
+    (zero? (random 2)))
 
-(define (file->short-hash pth)
-  (substring (bytes->hex-string (call-with-input-file* pth
-                                  sha256-bytes))
-             0 7))
+  (define vocab
+    #(Age Air Art Bean Bell Big Bird Boat Book Cake Cat Cup Day Dog Dry Ear Ever Eye Face Few Fish
+Game Gift Hat Hen Hot How Ice Key Kind Leaf Love Low Map May Moon Net New Old Path Put Rain Read
+Run Safe Say Ship Sky Sun Swim Talk Tea Tidy Toe Town Use Very Wait Walk Warm Wet Who Why Win
+Wise Wish Yard Yet Zoo))
+  (define (random-words [n #f])
+    (for/list ([__ (in-range (or n (add1 (modulo (random 19) 12))))])
+      (vector-ref vocab (random (vector-length vocab)))))
+  (define (random-string [n #f])
+    (match (random-words)
+      [(list sym)
+       (symbol->immutable-string sym)]
+      [lst
+       (string-append* (map symbol->immutable-string lst))]))
+  (define (random-symbol [n #f])
+    (match (random-words)
+      [(list sym)
+       sym]
+      [lst
+       (string->symbol (string-append* (map symbol->immutable-string lst)))]))
+
+  (define (random-int32)
+    (- (random-bits 32)
+       (expt 2 31)))
+
+  (define (random-inexact-rational)
+    (let* ([x (if (coin-toss)
+                  (exact->inexact (random-bits 24))
+                  (* (random) (expt 10 (random 8))))]
+           [x (if (coin-toss)
+                  x
+                  (- x))]
+           [x (flsingle x)])
+      (if (rational? x)
+          x
+          (random-inexact-rational))))
+
+  (define (random-atomic-jsexpr)
+    (match (random 6)
+      [0 (random-string)]
+      [1 (random-int32)]
+      [2 (random-inexact-rational)]
+      [3 'null]
+      [4 #f]
+      [5 #t]))
+
+  (define (random-compound-jsexpr [max-nesting 8])
+    (define max-length 5)
+    (define lst
+      (for/list ([i (in-range (random max-length))])
+        (if (or (zero? max-nesting)
+                (coin-toss))
+            (random-atomic-jsexpr)
+            (random-compound-jsexpr (sub1 max-nesting)))))
+    (if (coin-toss)
+        lst
+        (for/fold ([hsh #hasheq()])
+                  ([rhs (in-list lst)])
+          (let retry ()
+            (define key (random-symbol))
+            (if (hash-has-key? hsh key)
+                (retry)
+                (hash-set hsh key rhs)))))))
+
+;                                                                                          
+;                                                                                          
+;                                                                                          
+;                                                                                          
+;                                                                                          
+;                ;;       ;;                        ;;  ;;       ;;                        
+;                ;;       ;;                        ;;  ;;       ;;                        
+;                ;;       ;;                        ;;           ;;           ;            
+;                ;;       ;;                        ;;           ;;           ;            
+;    ;;;;    ;;;;;;   ;;;;;;       ;;    ;   ;;;;   ;;  ;;   ;;;;;;   ;;;;  ;;;;;   ;;;;   
+;   ;;  ;;  ;;   ;;  ;;   ;;        ;    ;  ;;  ;;  ;;  ;;  ;;   ;;  ;;  ;;   ;    ;;   ;  
+;        ;  ;    ;;  ;    ;;        ;   ;;       ;  ;;  ;;  ;    ;;       ;   ;    ;    ;; 
+;        ;  ;    ;;  ;    ;;  ;;;;  ;;  ;        ;  ;;  ;;  ;    ;;       ;   ;    ;    ;; 
+;    ;;;;;  ;    ;;  ;    ;;         ;  ;    ;;;;;  ;;  ;;  ;    ;;   ;;;;;   ;    ;;;;;;; 
+;   ;    ;  ;    ;;  ;    ;;         ;  ;   ;    ;  ;;  ;;  ;    ;;  ;    ;   ;    ;       
+;   ;    ;  ;    ;;  ;    ;;         ; ;    ;    ;  ;;  ;;  ;    ;;  ;    ;   ;    ;       
+;   ;  ;;;  ;;   ;;  ;;   ;;          ;;    ;  ;;;  ;;  ;;  ;;   ;;  ;  ;;;   ;    ;;   ;  
+;   ;;;; ;;  ;;;;;;   ;;;;;;          ;;    ;;;; ;; ;;; ;;   ;;;;;;  ;;;; ;;  ;;;   ;;;;   
+;                                                                                          
+;                                                                                          
+;                                                                                          
+;                                                                                          
+;                                                                                          
+
+(module add-validate racket/base
+  (require racket/contract
+           racket/file
+           racket/list
+           racket/match
+           racket/pretty
+           (only-in file/sha1 bytes->hex-string)
+           rackunit
+           json
+           (submod ".." data)
+           (submod ".." system)
+           (submod ".." random))
+  (provide (contract-out
+            [add
+             (-> test-datum/c string?)]
+            [add-random
+             (-> exact-positive-integer? (listof string?))]
+            [validate
+             (->* [string?]
+                  [#:redo-python? any/c]
+                  any)]
+            [validate-list
+             (->* [(listof string?)]
+                  [#:redo-python? any/c]
+                  any)]
+            [validate-all
+             (->* []
+                  [#:redo-python? any/c]
+                 any)]))
+  
+  (define (file->short-hash pth)
+    (substring (bytes->hex-string (call-with-input-file* pth
+                                    sha256-bytes))
+               0 7))
 
 
-(define (pretty-write-to-file x pth)
-  (call-with-output-file* pth
-    (λ (out)
-      (pretty-write x out))))
+  (define (pretty-write-to-file x pth)
+    (call-with-output-file* pth
+      (λ (out)
+        (pretty-write x out))))
 
-(define-values [node-write-datum
-                python-write-datum]
-  (let ()
-    (define (rm-f pth)
-      (delete-directory/files pth #:must-exist? #f))
-    (define (run-writer name proc datum #:exists [exists 'error])
-      (define json-pth (string-append name ".json"))
-      (define rktd-pth (string-append "args." name ".rktd"))
-      (when (eq? exists 'redo)
-        (for-each rm-f (list json-pth rktd-pth)))
-      (unless (and (eq? exists 'ignore)
-                   (file-exists? json-pth))
-        (rm-f rktd-pth)
-        (pretty-write-to-file (with-output-to-file json-pth
-                                (λ ()
-                                  (apply proc datum)))
-                              rktd-pth)))
-    (define (node-write-datum datum)
-      (run-writer "node" node-write-json datum))
-    (define (python-write-datum datum #:redo-python? [redo-python? #f])
-      (run-writer "python" python-write-json datum #:exists (if redo-python?
-                                                                    'redo
-                                                                    'ignore)))
-    (values node-write-datum
-            python-write-datum)))
+  (define-values [node-write-datum
+                  python-write-datum]
+    (let ()
+      (define (rm-f pth)
+        (delete-directory/files pth #:must-exist? #f))
+      (define (run-writer name proc datum #:exists [exists 'error])
+        (define json-pth (string-append name ".json"))
+        (define rktd-pth (string-append "args." name ".rktd"))
+        (when (eq? exists 'redo)
+          (for-each rm-f (list json-pth rktd-pth)))
+        (unless (and (eq? exists 'ignore)
+                     (file-exists? json-pth))
+          (rm-f rktd-pth)
+          (pretty-write-to-file (with-output-to-file json-pth
+                                  (λ ()
+                                    (apply proc datum)))
+                                rktd-pth)))
+      (define (node-write-datum datum)
+        (run-writer "node" node-write-json datum))
+      (define (python-write-datum datum #:redo-python? [redo-python? #f])
+        (run-writer "python" python-write-json datum #:exists (if redo-python?
+                                                                  'redo
+                                                                  'ignore)))
+      (values node-write-datum
+              python-write-datum)))
 
-(define (add datum)
-  (define incoming
-    (make-temporary-directory #:base-dir indent-test-data/))
-  (define dir
-    (parameterize ([current-directory incoming])
-      (pretty-write-to-file datum "datum.rktd")
-      (node-write-datum datum)
-      (file->short-hash "datum.rktd")))
-  (rename-file-or-directory incoming (build-path indent-test-data/ dir))
-  (validate dir))
+  (define (add datum)
+    (define incoming
+      (make-temporary-directory #:base-dir indent-test-data/))
+    (define dir
+      (parameterize ([current-directory incoming])
+        (pretty-write-to-file datum "datum.rktd")
+        (node-write-datum datum)
+        (file->short-hash "datum.rktd")))
+    (rename-file-or-directory incoming (build-path indent-test-data/ dir))
+    (validate dir)
+    dir)
 
-(define (file->jsexpr pth)
-  (string->jsexpr ; ensure whole file is consumed
-   (file->string pth)))
+  (define (add-random num-random-to-add)
+    (for/list ([i (in-inclusive-range 1 num-random-to-add)]
+               [indent (in-cycle (shuffle portable-indent-values))])
+      ;; Use all indentations as equally with as possible,
+      ;; with a random selection for the remainder.
+      (add (list indent (random-compound-jsexpr)))))
 
-(define (validate dir #:redo-python? [redo-python? #f])
-  (parameterize ([current-directory (build-path indent-test-data/ dir)])
-    (match-define (and datum (list indent jsexpr))
-      (file->value "datum.rktd"))
-    (python-write-datum datum #:redo-python? redo-python?)
-    (test-case
-     (string-append dir "/")
-     (test-equal? "datum.rktd contains correct value"
-                  (file->short-hash "datum.rktd")
-                  dir)
-     (test-equal? "node.json contains correct value"
-                  (file->jsexpr "node.json")
-                  jsexpr)
-     (test-equal? "python.json is identical to node.json"
-                  (file->string "python.json")
-                  (file->string "node.json")))
-    dir))
+  (define (file->jsexpr pth)
+    (string->jsexpr ; ensure whole file is consumed
+     (file->string pth)))
 
-(define (validate-list dirs #:redo-python? [redo-python? #f])
-  (for-each (λ (dir)
-              (validate dir #:redo-python? redo-python?))
-            dirs))
+  (define (validate dir #:redo-python? [redo-python? #f])
+    (parameterize ([current-directory (build-path indent-test-data/ dir)])
+      (match-define (and datum (list indent jsexpr))
+        (file->value "datum.rktd"))
+      (python-write-datum datum #:redo-python? redo-python?)
+      (test-case
+       (string-append dir "/")
+       (test-equal? "datum.rktd contains correct value"
+                    (file->short-hash "datum.rktd")
+                    dir)
+       (test-equal? "node.json contains correct value"
+                    (file->jsexpr "node.json")
+                    jsexpr)
+       (test-equal? "python.json is identical to node.json"
+                    (file->string "python.json")
+                    (file->string "node.json")))))
 
-(define (validate-all #:redo-python? [redo-python? #f])
-  (validate-list #:redo-python? redo-python?
-                 (parameterize ([current-directory indent-test-data/])
-                   (for/list ([pth (in-list (directory-list))]
-                              #:when (directory-exists? pth))
-                     (path->string pth)))))
+  (define (validate-list dirs #:redo-python? [redo-python? #f])
+    (for-each (λ (dir)
+                (validate dir #:redo-python? redo-python?))
+              dirs))
 
-(define (add-random num-random-to-add #:redo-python? [redo-python? #f])
-  (for/list ([i (in-inclusive-range 1 num-random-to-add)]
-             [indent (in-cycle (shuffle portable-indent-values))])
-    ;; Use all indentations as equally with as possible,
-    ;; with a random selection for the remainder.
-    (add (list indent (random-compound-jsexpr)))))
+  (define (validate-all #:redo-python? [redo-python? #f])
+    (validate-list #:redo-python? redo-python?
+                   (parameterize ([current-directory indent-test-data/])
+                     (for/list ([pth (in-list (directory-list))]
+                                #:when (directory-exists? pth))
+                       (path->string pth))))))
