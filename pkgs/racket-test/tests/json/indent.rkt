@@ -257,7 +257,7 @@
            racket/symbol)
   (define MAX-LENGTH 5)
   (define portable-indent/e ; levels above 10 are not reproducible in JS
-    (or/e (single/e #\tab) (except/e (below/e 11) 0)))
+    (or/e (single/e #\tab) (range/e 1 10)))
   (define (jsnull? x)
     (eq? x 'null))
   (define jsnull/e
@@ -267,8 +267,7 @@
   (define inexact-rational/e
     (except/e flonum/e +inf.0 -inf.0 +nan.0 #:contract inexact-rational?))
   (define constrained-char/e
-    (let ([base/e (append/e (range/e 48 57) ;[0-9]
-                            (range/e 65 90) ;[A-Z]
+    (let ([base/e (append/e (range/e 65 90) ;[A-Z]
                             (range/e 97 122))]) ;[a-z]
       (map/e integer->char
              char->integer
@@ -333,9 +332,9 @@
   (define jsobject/e
     (or/e
      (single/e #hasheq())
-     (map/e #:contract (and/c hash? #;(hash/c symbol?
-                                              (recursive-contract (enum-contract jsexpr/e) #:flat)
-                                              #:immutable #t)
+     (map/e #:contract (and/c (hash/c symbol?
+                                      (recursive-contract (enum-contract jsexpr/e) #:flat)
+                                      #:immutable #t)
                               hash-eq?
                               (property/c hash-count (between/c 1 MAX-LENGTH)))
             (match-lambda
@@ -351,19 +350,7 @@
              [keys nonempty-keys/e]
              [vals (keys) (listof-n/e jsexpr/e (set-count keys))]))))
   (define jsarray/e
-    (listof/e jsexpr/e)
-    #;
-    (or/e
-     (single/e '())
-     (map/e #:contract (and/c list? ;(listof (recursive-contract (enum-contract jsexpr/e) #:flat))
-                              (property/c length (between/c 1 MAX-LENGTH)))
-            cdr
-            (λ (lst)
-              (cons (length lst) lst))
-            (cons/de
-             [len (range/e 1 MAX-LENGTH)]
-             [body (len)
-              (listof-n/e jsexpr/e len)]))))
+    (listof/e jsexpr/e))
   (define compound-jsexpr/e
     (or/e (cons jsarray/e list?)
           (cons jsobject/e hash?)))
