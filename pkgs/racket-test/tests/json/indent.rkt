@@ -9,7 +9,7 @@
            racket/contract)
   (define-runtime-path indent-test-data/
     "indent-test-data/")
-  (define portable-indent-values
+  (define portable-indent-values ; lengths longer than 10 are not portable to JS
     (cons #\tab (inclusive-range 1 10)))
   (define portable-indent/c
     (or/c #\tab (integer-in 1 10)))
@@ -240,7 +240,7 @@
                 (if (= 1 num-random-to-add)
                     @list{Added randomly-chosen data in directory "@car[done]/".@"\n"}
                     (cons "Added randomly-chosen data in these directories:\n  "
-                          (add-between done "/\n  " #:after-last '("/\n"))))))
+                          (add-between done '("/\n  ") #:after-last '("/\n") #:splice? #t)))))
     (cond
       [validate-all?
        (validate-all #:redo-python? redo-python?)]
@@ -375,8 +375,7 @@
 ;                                                         
 
 (module random racket/base
-  (require math/base
-           racket/contract
+  (require racket/contract
            racket/flonum
            racket/match
            racket/string
@@ -410,30 +409,23 @@ Wise Wish Yard Yet Zoo))
       [lst
        (string->symbol (string-append* (map symbol->immutable-string lst)))]))
 
-  (define (random-int32)
-    (- (random-bits 32)
-       (expt 2 31)))
-
-  (define (random-inexact-rational)
-    (let* ([x (if (coin-toss)
-                  (exact->inexact (random-bits 24))
-                  (* (random) (expt 10 (random 8))))]
-           [x (if (coin-toss)
-                  x
-                  (- x))]
-           [x (flsingle x)])
-      (if (rational? x)
-          x
-          (random-inexact-rational))))
+  (define (random-portable-number)
+    ;; JS does not distinguish inexact integers from exact.
+    (define x
+      (flsingle
+       ((if (coin-toss) - values)
+        (* (random) (expt 10 (random 8))))))
+    (if (and (rational? x) (not (integer? x)))
+        x
+        (random-portable-number)))
 
   (define (random-atomic-jsexpr)
-    (match (random 6)
+    (match (random 5)
       [0 (random-string)]
-      [1 (random-int32)]
-      [2 (random-inexact-rational)]
-      [3 'null]
-      [4 #f]
-      [5 #t]))
+      [1 (random-portable-number)]
+      [2 'null]
+      [3 #f]
+      [4 #t]))
 
   (define (random-compound-jsexpr [max-nesting 8])
     (define max-length 5)
@@ -505,7 +497,7 @@ Wise Wish Yard Yet Zoo))
             [validate-all
              (->* []
                   [#:redo-python? any/c]
-                 any)]))
+                  any)]))
   
   (define (file->short-hash pth)
     (substring (bytes->hex-string (call-with-input-file* pth
@@ -572,17 +564,17 @@ Wise Wish Yard Yet Zoo))
       (match-define (and datum (list indent jsexpr))
         (file->value "datum.rktd"))
       (python-write-datum datum #:redo-python? redo-python?)
-      (test-case
-       (string-append dir "/")
-       (test-equal? "datum.rktd contains correct value"
-                    (file->short-hash "datum.rktd")
-                    dir)
-       (test-equal? "node.json contains correct value"
-                    (file->jsexpr "node.json")
-                    jsexpr)
-       (test-equal? "python.json is identical to node.json"
-                    (file->string "python.json")
-                    (file->string "node.json")))))
+      (with-check-info
+          (['directory dir])
+        (check-equal? (file->short-hash "datum.rktd")
+                      dir
+                      "datum.rktd should contain correct value")
+        (check-equal? (file->jsexpr "node.json")
+                      jsexpr
+                      "node.json should contain correct value")
+        (check-equal? (file->string "python.json")
+                      (file->string "node.json")
+                      "python.json should be identical to node.json"))))
 
   (define (validate-list dirs #:redo-python? [redo-python? #f])
     (for-each (λ (dir)
