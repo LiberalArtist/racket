@@ -305,28 +305,31 @@
                                         (boolean? x)
                                         (string? x)
                                         (jsnull? x)))))))
-  (define (setof-n/e e n)
-    (cond
-      [(zero? n)
-       (single/e (set))]
-      [else
-       (map/e
-        #:contract (and/c (set/c (enum-contract e))
-                          (property/c set-count (=/c n)))
-        (λ (lst)
-          (for/set ([nat (in-list lst)])
-            (from-nat e nat)))
-        (λ (st)
-          (sort (for/list ([x (in-set st)])
-                  (to-nat e x))
-                >))
-        (let loop ([n n])
-          (if (= 1 n)
-              (list/e natural/e)
-              (cons/de
-               [head (tail)
-                (nat+/e (add1 (car tail)))]
-               [tail (loop (sub1 n))]))))]))
+  (define nonempty-keys/e
+    (map/e
+     #:contract (and/c (set/c (enum-contract constrained-symbol/e))
+                       (property/c set-count (between/c 1 MAX-LENGTH)))
+     (λ (lst)
+       (for/set ([nat (in-list lst)])
+         (from-nat constrained-symbol/e nat)))
+     (λ (st)
+       (sort (for/list ([x (in-set st)])
+               (to-nat constrained-symbol/e x))
+             >))
+     (apply or/e
+            (let loop ([n MAX-LENGTH])
+              (if (= 0 n)
+                  null
+                  (let ([smaller (loop (sub1 n))])
+                    (cons (cons (if (= 1 n)
+                                    (list/e natural/e) 
+                                    (cons/de
+                                     [head (tail)
+                                      (nat+/e (add1 (car tail)))]
+                                     [tail (caar smaller)]))
+                                (λ (x)
+                                  (and (list? x) (= n (length x)))))
+                          smaller)))))))
   (define jsobject/e
     (or/e
      (single/e #hasheq())
@@ -336,20 +339,17 @@
                               hash-eq?
                               (property/c hash-count (between/c 1 MAX-LENGTH)))
             (match-lambda
-              [(cons _ (cons keys vals))
+              [(cons keys vals)
                (for/hasheq ([k (in-list (sort (set->list keys) symbol<?))]
                             [v (in-list vals)])
                  (values k v))])
             (λ (hsh)
-              (cons (hash-count hsh)
-                    (cons (for/set ([k (in-immutable-hash-keys hsh)])
-                            k)
-                          (hash-values hsh 'ordered))))
+              (cons (for/set ([k (in-immutable-hash-keys hsh)])
+                      k)
+                    (hash-values hsh 'ordered)))
             (cons/de
-             [len (range/e 1 MAX-LENGTH)]
-             [body (len)
-              (cons/e (setof-n/e constrained-symbol/e len)
-                      (listof-n/e jsexpr/e len))]))))
+             [keys nonempty-keys/e]
+             [vals (keys) (listof-n/e jsexpr/e (set-count keys))]))))
   (define jsarray/e
     (listof/e jsexpr/e)
     #;
@@ -567,7 +567,7 @@
 (define (datum-from-nat n)
   (from-nat test-datum/e n))
 (define (dir-for-nat n)
-  (build-path indent-test-data/ (number->string n)))
+  (build-path indent-test-data/ (number->string n 16)))
 
 (define (pretty-write-to-file x pth)
   (call-with-output-file* pth
@@ -667,3 +667,12 @@
         [else
          (add-from-nat nat)
          nat]))))
+#|
+> (add-random 1)
+'(8)
+> (add-random 1)
+make-directory: cannot make directory
+  path: /home/philip/code/21.10-bastet/tmp/racket/pkgs/racket-test/tests/json/indent-test-data/1159095743630242463503902360465296914727929856602061634773857791147331130940696236210595899834928447921078949166179263610023481639037797778918787178285142010019091718315168946228794182868151496416393469376567444509680442144390298620278835213345919107890394213820441789001968926237877019365606893543187487782730092171122905432869687710368670434619592698512247149708884930233546024012680438385361147721567478441078851
+  system error: File name too long; errno=36
+/home/philip/code/21.10-bastet/tmp/racket/pkgs/racket-test/tests/json/indent-test-data/88973281688915745539980356488217840928481594244372283878585184173890957078970022600659843539861661687861990345501384467626159840564319553213797070849535033614426026293283981054678349563970947732021792445995158152615311394680347252436029167926466071154034089127629290136545386580358166404587226508639012541172985556475060963224794099198708525295262982770203821412822982808321318156300567361571655764989747405381333492239022963652170025302934686561076578459706585736210101512740716295558643581175127387863106364057718698447973955271501989422101779342035678271082107868774559141976969950411257513605371693249450902412364453748127576110534279288654268234846021880950240263806872853479721881987993528725898845974892512340223328427342280622444726051260867452523898207920153090418508679131870946181146215562005441345521758893781808606967686516277976969989628401296574232996986817477299170691260502084834927900225424390404730715394645390203888580495380373336911293181166912056472671898357003495251238428468667088090330308555692675527421549701796578993957608005157510293656441559372809764867039728585682671033974795014190634851833648627139282424331157993877561073522700220158111106968341910460440673308444292141037359333922659712572104464280215672314871871913581488125521723967243849163451022950111064477959896379738577169632760052788374479394244675647684106356651674482840080030975083469668683075124366271415745602976061038558177041512959464177752668152651394472660957607591484248732971280475847682528231390097502251168734099863811711077487476390119403870094425778859548656232677266570788767359328462834816283066988810646674139829950912716745736257327165794567049278016573401724226613968065031320188090321505911020850152339656115841816056779446401542527127834718336312127356837133821618317490217387873378526675976345001735042548260468572773112697823771687336691437600644015667034876909242943631028773717889962818516164286248408517623793953472247973274624423995042785248375824417450389503754937787775587880951491349067728294090940040356908965883452744023855501771299190372312990912748850137009809095674097277680484722574177166164753914813077949226836062432098263324624820268763599597148
+|#
