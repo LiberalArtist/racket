@@ -1,7 +1,6 @@
 #lang at-exp racket ;/base
 
 ;; This files assumes `(eq? 'null (json-null))`.
-
 (module+ test
   (run-tests json-indent-tests))
 
@@ -34,14 +33,22 @@
                #:when (directory-exists? abs))
      (test-suite
       (path->string dir)
-     (parameterize ([current-directory abs])
-       (match-define (and datum (list indent jsexpr))
-         (file->value "datum.rktd"))
-       (check-equal? (jsexpr->string #:indent indent jsexpr)
-                     (let ([str (file->string "node.json")])
-                       ;; remove trailing newline we added
-                       (substring str 0 (sub1 (string-length str))))
-                     "indentation should match"))))))
+      (parameterize ([current-directory abs])
+        (match-define (and datum (list indent jsexpr))
+          (file->value "datum.rktd"))
+        (with-check-info (['directory (path->string dir)])
+          (check-equal? (jsexpr->string #:indent indent jsexpr)
+                        (let ([str (file->string "node.json")])
+                          ;; remove trailing newline we added
+                          (substring str 0 (sub1 (string-length str))))
+                        "indentation should match")))))))
+
+(define (failing-directories)
+  (for*/list ([r (in-list (run-test json-indent-tests))]
+              #:when (test-failure? r)
+              [info (exn:test:check-stack (test-failure-result r))]
+              #:when (eq? 'directory (check-info-name info)))
+    (check-info-value info)))
 
 (module* cli racket/base
   ;; In a shell, source `alias.sh` in this directory to be able to run `indent-test-data-cli`.
@@ -495,7 +502,7 @@ Wise Wish Yard Yet Zoo))
            racket/pretty
            (only-in file/sha1 bytes->hex-string)
            rackunit
-           json
+           "../../../../racket/collects/json/main.rkt"
            (submod ".." data)
            (submod ".." system)
            (submod ".." random))
@@ -582,6 +589,11 @@ Wise Wish Yard Yet Zoo))
       (match-define (and datum (list indent jsexpr))
         (file->value "datum.rktd"))
       (python-write-datum datum #:redo-python? redo-python?)
+      (call-with-atomic-output-file
+       "debug.json"
+       (λ (out _tmp)
+         (write-json #:indent indent jsexpr out)
+         (newline out)))
       (with-check-info
           (['directory dir])
         (check-equal? (file->short-hash "datum.rktd")
