@@ -2282,11 +2282,53 @@ implementation notes:
           (opaque #t)
           (fields decode-desc encode-desc))
 
-        (define $iconv-open (foreign-procedure "(cs)s_iconv_open" (string string) ptr))
-        (define $iconv-close (foreign-procedure "(cs)s_iconv_close" (uptr) void))
-        (define $iconv-from-string (foreign-procedure "(cs)s_iconv_from_string" (uptr ptr uptr uptr ptr uptr uptr) ptr))
-        (define $iconv-to-string (foreign-procedure "(cs)s_iconv_to_string" (uptr ptr uptr uptr ptr uptr uptr) ptr))
-
+        (module ($iconv-open $iconv-close $iconv-from-string $iconv-to-string)
+          (define iconv-from-string
+            (and (foreign-entry? "(cs)s_iconv_from_string")
+                 (foreign-procedure "(cs)s_iconv_from_string" (uptr ptr uptr uptr ptr uptr uptr) ptr)))
+          (define iconv-to-string
+            (and (foreign-entry? "(cs)s_iconv_to_string")
+                 (foreign-procedure "(cs)s_iconv_to_string" (uptr ptr uptr uptr ptr uptr uptr) ptr)))
+          (define (get-iconv-open)
+            (foreign-procedure "(cs)s_iconv_open" (string string) uptr))
+          (define (get-iconv-close)
+            (foreign-procedure "(cs)s_iconv_close" (uptr) void))
+          (define open
+            (if (and iconv-from-string iconv-to-string)
+                (if-feature windows #f (get-iconv-open))
+                (lambda (a b)
+                  #f)))
+          (define close
+            (if (and iconv-from-string iconv-to-string)
+                (if-feature windows #f (get-iconv-close))
+                (lambda (x)
+                  (void))))
+          (define from-string
+            (if-feature windows #f iconv-from-string))
+          (define to-string
+            (if-feature windows #f iconv-to-string))
+          (define ($iconv-close cd)
+            (close cd))
+          (define ($iconv-from-string cd in i iend out o oend)
+            (from-string cd in i iend out o oend))
+          (define ($iconv-to-string cd in i iend out o oend)
+            (to-string cd in i iend out o oend))
+          (define ($iconv-open a b)
+            (define trouble
+              (when-feature windows
+                (unless (and open close from-string to-string)
+                  (with-tc-mutex
+                   (unless open
+                     (cond
+                      [((foreign-procedure "(cs)s_load_iconv" () ptr))]
+                      [else ; no trouble
+                       (set! open (get-iconv-open))
+                       (set! close (get-iconv-close))
+                       (set! from-string iconv-from-string)
+                       (set! to-string iconv-to-string)]))))))
+            (if (string? trouble)
+                trouble
+                (open a b))))
         (define iconv-decode
           (let ()
             (define (err who tp info i iend bv)

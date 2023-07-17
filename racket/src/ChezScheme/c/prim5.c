@@ -123,9 +123,10 @@ static IBOOL s_interactivep(void);
 static IBOOL s_same_devicep(INT fd1, INT fd2);
 static uptr s_malloc(iptr n);
 static void s_free(uptr n);
-#ifdef FEATURE_ICONV
-static ptr s_iconv_open(const char *tocode, const char *fromcode);
-static void s_iconv_close(uptr cd);
+#if defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV))
+# ifdef WIN32
+static ptr s_load_iconv(void);
+# endif
 static ptr s_iconv_from_string(uptr cd, ptr in, uptr i, uptr iend, ptr out, uptr o, uptr oend);
 static ptr s_iconv_to_string(uptr cd, ptr in, uptr i, uptr iend, ptr out, uptr o, uptr oend);
 #endif
@@ -455,7 +456,7 @@ static void s_show_chunks(FILE *out, ptr sorted_chunks) {
 #define space_total (space_bogus + 1)
 #define generation_total (static_generation + 1)
 #define INCRGEN(g) (g = g == S_G.max_nonstatic_generation ? static_generation : g+1)
-static void s_showalloc(IBOOL show_dump, const char *outfn) {
+static void s_showalloc(IBOOL s/gnu/store/ljmngd5658lghca5l8352y0d1wpvqza0-chez-scheme-9.5.8/how_dump, const char *outfn) {
   FILE *out;
   iptr count[generation_total+1][space_total+1];
   uptr bytes[generation_total+1][space_total+1];
@@ -1927,12 +1928,16 @@ void S_prim5_init(void) {
     Sforeign_symbol("(cs)same_devicep", (void *)s_same_devicep);
     Sforeign_symbol("(cs)malloc", (void *)s_malloc);
     Sforeign_symbol("(cs)free", (void *)s_free);
-#ifdef FEATURE_ICONV
-    Sforeign_symbol("(cs)s_iconv_open", (void *)s_iconv_open);
-    Sforeign_symbol("(cs)s_iconv_close", (void *)s_iconv_close);
+#if defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV))
     Sforeign_symbol("(cs)s_iconv_from_string", (void *)s_iconv_from_string);
     Sforeign_symbol("(cs)s_iconv_to_string", (void *)s_iconv_to_string);
-#endif
+# ifdef WIN32
+    Sforeign_symbol("(cs)s_load_iconv", (void *)s_load_iconv);
+# else
+    Sforeign_symbol("(cs)s_iconv_open", (void *)iconv_open);
+    Sforeign_symbol("(cs)s_iconv_close", (void *)iconv_close);
+# endif
+#endif /* defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV)) */
     Sforeign_symbol("(cs)s_strerror", (void *)S_strerror);
     Sforeign_symbol("(cs)s_errno", (void *)s_errno);
 #ifdef WIN32
@@ -2175,34 +2180,12 @@ static void s_free(uptr addr) {
   free(TO_VOIDP(addr));
 }
 
-#ifdef FEATURE_ICONV
-#ifdef DISABLE_ICONV
-# define iconv_t int
-#define ICONV_OPEN(to, from) (use_sink(to), use_sink(from), -1)
-#define ICONV(cd, in, inb, out, outb) (use_sinki(cd), use_sink(in), use_sink(inb), use_sink(out), use_sink(outb), -1)
-#define ICONV_CLOSE(cd) (use_sinki(cd), -1)
-static void use_sink(UNUSED const void *p) { }
-static void use_sinki(UNUSED int i) { }
-#elif defined(WIN32)
-typedef void *iconv_t;
-typedef iconv_t (*iconv_open_ft)(const char *tocode, const char *fromcode);
-typedef size_t (*iconv_ft)(iconv_t cd, char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);
-typedef int (*iconv_close_ft)(iconv_t cd);
-
-static iconv_open_ft iconv_open_f = (iconv_open_ft)0;
-static iconv_ft iconv_f = (iconv_ft)0;
-static iconv_close_ft iconv_close_f = (iconv_close_ft)0;
-#define ICONV_OPEN iconv_open_f
-#define ICONV iconv_f
-#define ICONV_CLOSE iconv_close_f
-#else
-#include <iconv.h>
-#define ICONV_OPEN iconv_open
-#define ICONV iconv
-#define ICONV_CLOSE iconv_close
-#endif
-
+#ifdef defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV))
 #ifdef WIN32
+typedef void *iconv_t;
+typedef size_t (*iconv_ft)(iconv_t cd, char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);
+static iconv_ft iconv_f = (iconv_ft)0;
+#define ICONV iconv_f
 static ptr s_iconv_trouble(HMODULE h, const char *what) {
   wchar_t dllw[PATH_MAX];
   char *dll;
@@ -2222,42 +2205,33 @@ static ptr s_iconv_trouble(HMODULE h, const char *what) {
   free(msg);
   return r;
 }
-#endif /* WIN32 */
-
-static ptr s_iconv_open(const char *tocode, const char *fromcode) {
-  iconv_t cd;
-#ifdef WIN32
-  static int iconv_is_loaded = 0;
-  if (!iconv_is_loaded) {
-    HMODULE h = LoadLibraryW(L"iconv.dll");
-    if (h == NULL) h = LoadLibraryW(L"libiconv.dll");
-    if (h == NULL) h = LoadLibraryW(L"libiconv-2.dll");
-    if (h == NULL) h = LoadLibraryW(L".\\iconv.dll");
-    if (h == NULL) h = LoadLibraryW(L".\\libiconv.dll");
-    if (h == NULL) h = LoadLibraryW(L".\\libiconv-2.dll");
-    if (h == NULL) return Sstring("cannot load iconv.dll, libiconv.dll, or libiconv-2.dll");
-    if ((iconv_open_f = (void *)GetProcAddress(h, "iconv_open")) == NULL &&
-        (iconv_open_f = (void *)GetProcAddress(h, "libiconv_open")) == NULL)
-      return s_iconv_trouble(h, "iconv_open or libiconv_open");
-    if ((iconv_f = (void *)GetProcAddress(h, "iconv")) == NULL &&
-        (iconv_f = (void *)GetProcAddress(h, "libiconv")) == NULL)
-      return s_iconv_trouble(h, "iconv or libiconv");
-    if ((iconv_close_f = (void *)GetProcAddress(h, "iconv_close")) == NULL &&
-        (iconv_close_f = (void *)GetProcAddress(h, "libiconv_close")) == NULL)
-      return s_iconv_trouble(h, "iconv_close or libiconv_close");
-    iconv_is_loaded = 1;
-  }
-#endif /* WIN32 */
-
-  if ((cd = ICONV_OPEN(tocode, fromcode)) == (iconv_t)-1) return Sfalse;
-
- /* have to be able to cast to int, since iconv_open can return (iconv_t)-1 */
-  return Sunsigned((uptr)cd);
-}
-
-static void s_iconv_close(uptr cd) {
-  ICONV_CLOSE((iconv_t)cd);
-}
+/* called with tc mutex held */
+static ptr s_load_iconv(void) {
+  void *iconv_open_f = NULL;
+  void *iconv_close_f = NULL;
+  HMODULE h = LoadLibraryW(L"iconv.dll");
+  if (h == NULL) h = LoadLibraryW(L"libiconv.dll");
+  if (h == NULL) h = LoadLibraryW(L"libiconv-2.dll");
+  if (h == NULL) h = LoadLibraryW(L".\\iconv.dll");
+  if (h == NULL) h = LoadLibraryW(L".\\libiconv.dll");
+  if (h == NULL) h = LoadLibraryW(L".\\libiconv-2.dll");
+  if (h == NULL) return Sstring("cannot load iconv.dll, libiconv.dll, or libiconv-2.dll");
+  if ((iconv_open_f = (void *)GetProcAddress(h, "iconv_open")) == NULL &&
+      (iconv_open_f = (void *)GetProcAddress(h, "libiconv_open")) == NULL)
+    return s_iconv_trouble(h, "iconv_open or libiconv_open");
+  if ((iconv_f = (void *)GetProcAddress(h, "iconv")) == NULL &&
+      (iconv_f = (void *)GetProcAddress(h, "libiconv")) == NULL)
+    return s_iconv_trouble(h, "iconv or libiconv");
+  if ((iconv_close_f = (void *)GetProcAddress(h, "iconv_close")) == NULL &&
+      (iconv_close_f = (void *)GetProcAddress(h, "libiconv_close")) == NULL)
+    return s_iconv_trouble(h, "iconv_close or libiconv_close");
+  Sforeign_symbol("(cs)s_iconv_open", iconv_open_f);
+  Sforeign_symbol("(cs)s_iconv_close", iconv_close_f);
+  return Sfalse;
+#else
+#include <iconv.h>
+#define ICONV iconv
+#endif
 
 #define ICONV_BUFSIZ 400
 
@@ -2330,7 +2304,7 @@ static ptr s_iconv_to_string(uptr cd, ptr in, uptr i, uptr iend, ptr out, uptr o
     default: return FIX(SICONV_DUNNO);
   }
 }
-#endif /* FEATURE_ICONV */
+#endif /* defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV)) */
 
 #ifdef WIN32
 static ptr s_multibytetowidechar(unsigned cp, ptr inbv) {
