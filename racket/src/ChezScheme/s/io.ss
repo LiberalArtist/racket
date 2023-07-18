@@ -2285,14 +2285,14 @@ implementation notes:
         (module ($iconv-open $iconv-close $iconv-from-string $iconv-to-string)
           (define iconv-from-string
             (and (foreign-entry? "(cs)s_iconv_from_string")
-                 (foreign-procedure "(cs)s_iconv_from_string" (uptr ptr uptr uptr ptr uptr uptr) ptr)))
+                 (foreign-procedure "(cs)s_iconv_from_string" (iptr ptr uptr uptr ptr uptr uptr) ptr)))
           (define iconv-to-string
             (and (foreign-entry? "(cs)s_iconv_to_string")
-                 (foreign-procedure "(cs)s_iconv_to_string" (uptr ptr uptr uptr ptr uptr uptr) ptr)))
+                 (foreign-procedure "(cs)s_iconv_to_string" (iptr ptr uptr uptr ptr uptr uptr) ptr)))
           (define (get-iconv-open)
-            (foreign-procedure "(cs)s_iconv_open" (string string) uptr))
+            (foreign-procedure "(cs)s_iconv_open" (string string) iptr))
           (define (get-iconv-close)
-            (foreign-procedure "(cs)s_iconv_close" (uptr) void))
+            (foreign-procedure "(cs)s_iconv_close" (iptr) void))
           (define open
             (if (and iconv-from-string iconv-to-string)
                 (if-feature windows #f (get-iconv-open))
@@ -2328,7 +2328,9 @@ implementation notes:
                        (set! to-string iconv-to-string)]))))))
             (if (string? trouble)
                 trouble
-                (open a b))))
+                (let ([cd (open a b)])
+                  (and (not (= -1 cd))
+                       cd)))))
         (define iconv-decode
           (let ()
             (define (err who tp info i iend bv)
