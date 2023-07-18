@@ -27,6 +27,10 @@
 #include <sys/resource.h>
 #endif
 
+#if defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV)) && (!defined(WIN32))
+#include <iconv.h>
+#endif
+
 /* locally defined functions */
 static INT s_errno(void);
 static IBOOL s_addr_in_heap(uptr x);
@@ -456,7 +460,7 @@ static void s_show_chunks(FILE *out, ptr sorted_chunks) {
 #define space_total (space_bogus + 1)
 #define generation_total (static_generation + 1)
 #define INCRGEN(g) (g = g == S_G.max_nonstatic_generation ? static_generation : g+1)
-static void s_showalloc(IBOOL s/gnu/store/ljmngd5658lghca5l8352y0d1wpvqza0-chez-scheme-9.5.8/how_dump, const char *outfn) {
+static void s_showalloc(IBOOL show_dump, const char *outfn) {
   FILE *out;
   iptr count[generation_total+1][space_total+1];
   uptr bytes[generation_total+1][space_total+1];
@@ -2180,7 +2184,7 @@ static void s_free(uptr addr) {
   free(TO_VOIDP(addr));
 }
 
-#ifdef defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV))
+#if defined(FEATURE_ICONV) && (!defined(DISABLE_ICONV))
 #ifdef WIN32
 typedef void *iconv_t;
 typedef size_t (*iconv_ft)(iconv_t cd, char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);
@@ -2231,7 +2235,7 @@ static ptr s_load_iconv(void) {
 #else
 #include <iconv.h>
 #define ICONV iconv
-#endif
+#endif /* WIN32 */
 
 #define ICONV_BUFSIZ 400
 
