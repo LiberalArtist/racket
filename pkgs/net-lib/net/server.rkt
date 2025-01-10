@@ -12,7 +12,7 @@
   (->* (evt? (-> input-port? output-port? any))
        (#:max-concurrent   (or/c +inf.0 natural-number/c)
         #:accept           (-> any/c (values input-port? output-port?))
-        #:close            (-> any/c void?)
+        #:close            (-> any/c any)
         #:make-timeout-evt (-> thread? input-port? output-port? boolean? evt?))
        res/c))
 

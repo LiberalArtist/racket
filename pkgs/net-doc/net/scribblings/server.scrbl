@@ -26,7 +26,7 @@ support for running general-purpose networked servers.}
                         (-> listener? (values input-port? output-port?))
                         tcp-accept]
                        [#:close close
-                        (-> listener? void?)
+                        (-> listener? any)
                         tcp-close]
                        [#:make-timeout-evt make-timeout-evt
                         (-> thread? input-port? output-port? boolean? evt?)
@@ -85,7 +85,7 @@ support for running general-purpose networked servers.}
                       (-> listener? (values input-port? output-port?))
                       tcp-accept]
                      [#:close close
-                      (-> listener? void?)
+                      (-> listener? any)
                       tcp-close]
                      [#:make-timeout-evt make-timeout-evt
                       (-> thread? input-port? output-port? boolean? evt?)
