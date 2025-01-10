@@ -89,9 +89,9 @@
  #"")
 ((define stop
    (start-server
-    #:accept-proc
+    #:accept
     unix-socket-accept
-    #:close-proc
+    #:close
     (λ (l) (delete-file (listener-path l)))
     (listener path (unix-socket-listen path 512))
     (make-tls-echo server-ctx)))
@@ -114,9 +114,9 @@
 ((define ch (make-channel)) ((3) 0 () 0 () () (c values c (void))) #"" #"")
 ((define stop
    (start-server
-    #:accept-proc
+    #:accept
     (λ (ports) (apply values ports))
-    #:close-proc
+    #:close
     void
     ch
     echo))

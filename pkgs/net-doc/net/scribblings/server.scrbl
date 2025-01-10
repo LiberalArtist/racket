@@ -20,17 +20,17 @@ support for running general-purpose networked servers.}
 @defproc[(start-server [listener (evt/c listener?)]
                        [handle (-> input-port? output-port? any)]
                        [#:max-concurrent max-concurrent
-                                         (or/c +inf.0 natural-number/c)
-                                         +inf.0]
-                       [#:accept-proc accept
-                                      (-> listener? (values input-port? output-port?))
-                                      tcp-accept]
-                       [#:close-proc close
-                                     (-> listener? void?)
-                                     tcp-close]
-                       [#:timeout-evt-proc make-timeout-evt
-                                           (-> thread? input-port? output-port? boolean? evt?)
-                                           (λ (thd in out break-sent?) never-evt)]) (-> void?)]{
+                        (or/c +inf.0 natural-number/c)
+                        +inf.0]
+                       [#:accept accept
+                        (-> listener? (values input-port? output-port?))
+                        tcp-accept]
+                       [#:close close
+                        (-> listener? void?)
+                        tcp-close]
+                       [#:make-timeout-evt make-timeout-evt
+                        (-> thread? input-port? output-port? boolean? evt?)
+                        (λ (thd in out break-sent?) never-evt)]) (-> void?)]{
 
   Creates a server that accepts connections when @racket[listener] is
   ready for synchronization. First, the server spawns a background
@@ -79,17 +79,17 @@ support for running general-purpose networked servers.}
 @defproc[(run-server [listener (evt/c listener?)]
                      [handle (-> input-port? output-port? any)]
                      [#:max-concurrent max-concurrent
-                                       (or/c +inf.0 exact-positive-integer?)
-                                       +inf.0]
-                     [#:accept-proc accept
-                                    (-> listener? (values input-port? output-port?))
-                                    tcp-accept]
-                     [#:close-proc close
-                                   (-> listener? void?)
-                                   tcp-close]
-                     [#:timeout-evt-proc make-timeout-evt
-                                         (-> thread? input-port? output-port? boolean? evt?)
-                                         (λ (thd in out break-sent?) never-evt)]) (-> void?)]{
+                      (or/c +inf.0 exact-positive-integer?)
+                      +inf.0]
+                     [#:accept accept
+                      (-> listener? (values input-port? output-port?))
+                      tcp-accept]
+                     [#:close close
+                      (-> listener? void?)
+                      tcp-close]
+                     [#:make-timeout-evt make-timeout-evt
+                      (-> thread? input-port? output-port? boolean? evt?)
+                      (λ (thd in out break-sent?) never-evt)]) (-> void?)]{
 
   Spawns a server using @racket[start-server] and blocks the current
   thread until a break is received.  Before returning, it stops the
@@ -214,8 +214,8 @@ Sockets"] for details on the procedures used here.}
   (define path "/tmp/server.sock")
   (define stop
     (start-server
-     #:accept-proc unix-socket-accept
-     #:close-proc (λ (l) (delete-file (listener-path l)))
+     #:accept unix-socket-accept
+     #:close (λ (l) (delete-file (listener-path l)))
      (listener path (unix-socket-listen path 512))
      (make-tls-echo server-ctx)))
   (code:line)
@@ -242,8 +242,8 @@ process and does not rely on any networking machinery:
   (define ch (make-channel))
   (define stop
     (start-server
-     #:accept-proc (λ (ports) (apply values ports))
-     #:close-proc void
+     #:accept (λ (ports) (apply values ports))
+     #:close void
      ch
      echo))
   (code:line)

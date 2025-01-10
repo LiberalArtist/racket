@@ -11,16 +11,16 @@
 (define (server-proc/c res/c)
   (->* (evt? (-> input-port? output-port? any))
        (#:max-concurrent   (or/c +inf.0 natural-number/c)
-        #:accept-proc      (-> any/c (values input-port? output-port?))
-        #:close-proc       (-> any/c void?)
-        #:timeout-evt-proc (-> thread? input-port? output-port? boolean? evt?))
+        #:accept           (-> any/c (values input-port? output-port?))
+        #:close            (-> any/c void?)
+        #:make-timeout-evt (-> thread? input-port? output-port? boolean? evt?))
        res/c))
 
 (define (start-server listener handle
                       #:max-concurrent   [max-concurrent +inf.0]
-                      #:accept-proc      [accept tcp-accept]
-                      #:close-proc       [close tcp-close]
-                      #:timeout-evt-proc [make-timeout-evt (λ (_thd _in _out _break-sent?) never-evt)])
+                      #:accept           [accept tcp-accept]
+                      #:close            [close tcp-close]
+                      #:make-timeout-evt [make-timeout-evt (λ (_thd _in _out _break-sent?) never-evt)])
   (define can-break?
     (break-enabled))
   (define paramz
