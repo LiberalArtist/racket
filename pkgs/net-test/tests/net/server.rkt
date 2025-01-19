@@ -125,7 +125,7 @@
     (define-values (stop port)
       (parameterize ([current-error-port err-out])
         (start-test-server*
-         #:make-timeout-evt
+         #:timeout-evt-proc
          (λ (_thd _in _out _break-sent?)
            (alarm-evt (+ (current-inexact-monotonic-milliseconds) 100) #t)))))
     (call-with-stop stop

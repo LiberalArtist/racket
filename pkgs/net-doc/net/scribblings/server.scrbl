@@ -18,79 +18,82 @@ The @racketmodname[net/server] library provides
 support for running general-purpose networked servers.
 
 @(define reference '(lib "scribblings/reference/reference.scrbl"))
+@(define unix-sockets-link @seclink["Echo_Server_over_Unix_Domain_Sockets"]{Unix domain sockets})
+@(define ports-link @seclink["Echo_Server_over_Ports"]{plain Racket ports})
 
 @defproc[(start-server [listen-evt (evt/c @#,tech{listener})]
                        [handle (-> input-port? output-port? any)]
                        [#:max-concurrent max-concurrent
                         (or/c +inf.0 natural-number/c)
                         +inf.0]
-                       [#:make-timeout-evt make-timeout-evt
+                       [#:timeout-evt-proc make-timeout-evt
                         (-> thread? input-port? output-port? boolean? evt?)
                         (λ (thd in out break-sent?) never-evt)]
-                       [#:accept accept
+                       [#:accept-proc accept
                         (-> @#,tech{listener} (values input-port? output-port?))
                         tcp-accept]
-                       [#:close close
+                       [#:close-proc close
                         (-> listen-evt any)
                         tcp-close]) (-> void?)]{
-
   Creates a server that accepts connections when @racket[listen-evt] is
-  ready for synchronization. For every new connection,
-  @racket[handle] is called with two arguments: an input port to read
-  from the client, and an output port to write to the client.
-  The result of @racket[start-server] is a procedure that, when called,
-  stops accepting new connections and calls @racket[close] on @racket[listen-evt],
-  but does not terminate active connections.
+  ready for synchronization. For every new connection, @racket[handle]
+  is called with two arguments: an input port to read from the
+  client, and an output port to write to the client. The result
+  of @racket[start-server] is a procedure that, when called,
+  stops accepting new connections and calls @racket[close] on
+  @racket[listen-evt], but does not terminate active connections.
 
-  The server spawns a background thread to accept new connections.
-  Each client connection is managed by a fresh custodian, and each
-  call to @racket[handle] occurs in a new thread managed by that
-  custodian. Each handling thread has an associated supervising thread
-  that shuts down the connection's custodian when the handling thread
-  terminates or when the result of @racket[make-timeout-evt] is ready
-  for synchronization. Breaks are enabled in handling threads if breaks
-  are enabled when @racket[start-server] is called. Handling threads
-  need not close the input and output ports they receive.
+  The server spawns a background thread to accept new connections. Each
+  client connection is managed by a fresh custodian, and each call to
+  @racket[handle] occurs in a new thread managed by that custodian. Each
+  handling thread has an associated supervising thread that shuts down
+  the connection's custodian when the handling thread terminates or when
+  the result of @racket[make-timeout-evt] is ready for synchronization.
+  Breaks are enabled in handling threads if breaks are enabled when
+  @racket[start-server] is called. Handling threads need not close the
+  input and output ports they receive.
 
-  To facilitate capturing a continuation in one connection thread
-  and invoking it in another, the parameterization of the @racket[run-server] call
-  is used for every call to @racket[handle]. In this parameterization and for the connection's
-  thread, the @racket[current-custodian] is parameterized to the connection's custodian.
+  To facilitate capturing a continuation in one connection
+  thread and invoking it in another, the parameterization of the
+  @racket[start-server] call is used for every call to @racket[handle].
+  In this parameterization and for the connection's thread, the
+  @racket[current-custodian] is parameterized to the connection's
+  custodian.
 
   For each connection, @racket[make-timeout-evt] is called with the
   connection-handling thread, the input port and the output port of
   the connection, and a boolean to signal if the handling thread has
-  already been sent a break (which will initially be @racket[#f]).
-  When the event it returns is ready for
-  synchronization, if the handling thread is still running, the
-  handling thread is sent a break and @racket[make-timeout-evt] is
-  called again (this time with @racket[#t] for the last argument)
-  to produce an event that, when ready for synchronization,
-  will cause the connection's custodian to be shut down and,
-  consequently, the handling thread to be killed if it is still running
-  by that time. The default @racket[make-timeout-evt] does not impose a timeout.
+  already been sent a break (which will initially be @racket[#f]). When
+  the event it returns is ready for synchronization, if the handling
+  thread is still running, the handling thread is sent a break and
+  @racket[make-timeout-evt] is called again (this time with @racket[#t]
+  for the last argument) to produce an event that, when ready for
+  synchronization, will cause the connection's custodian to be shut down
+  and, consequently, the handling thread to be killed if it is still
+  running by that time. The default @racket[make-timeout-evt] does not
+  impose a timeout.
 
   The server keeps track of the number of active connections
   and pauses accepting new connections once that number reaches
-  @racket[max-concurrent], resuming once the number goes down again.
-  By default, @racket[max-concurrent] is @racket[+inf.0], which
-  does not impose a limit on the number of active connections.
+  @racket[max-concurrent], resuming once the number goes down again. By
+  default, @racket[max-concurrent] is @racket[+inf.0], which does not
+  impose a limit on the number of active connections.
 
-  The @racket[listen-evt], @racket[accept] and @racket[close] arguments
-  together determine the protocol that is used.
-  The procedures must all work on the same kinds of values.
-  The default @racket[accept] and @racket[close] procedures expect
+  The @racket[listen-evt], @racket[accept] and @racket[close]
+  arguments together determine the protocol that is used. The
+  procedures must all work on the same kinds of values. The
+  default @racket[accept] and @racket[close] procedures expect
   @racket[listen-evt] to be a @tech[#:doc reference]{TCP listener}
-  as created by @racket[tcp-listen].
-  The examples illustrate using these arguments to serve instead
-  over @seclink["Echo_Server_over_Unix_Domain_Sockets"]{Unix domain sockets}
-  or over @seclink["Echo_Server_over_Ports"]{plain Racket ports}.
-  In the general case, @racket[listen-evt] must be a @tech[#:doc reference]{synchronizable event}
-  that is @tech[#:doc reference]{ready for synchronization} when @racket[accept]
-  would not block, and its @tech[#:doc reference]{synchronization result}
-  must be some kind of @deftech{listener} value (perhaps @racket[listen-evt] itself)
-  that can be passed to @racket[accept].
-  Additionally, @racket[listen-evt] itself must be suitable as an argument to @racket[close].
+  as created by @racket[tcp-listen]. The examples illustrate using
+  these arguments to serve instead over @unix-sockets-link or over
+  @|ports-link|. In the general case, @racket[listen-evt] must be a
+  @tech[#:doc reference]{synchronizable event} that is @tech[#:doc
+  reference]{ready for synchronization} when @racket[accept] would not
+  block, and its @tech[#:doc reference]{synchronization result} must be
+  some kind of @deftech{listener} value (perhaps @racket[listen-evt]
+  itself) that can be passed to @racket[accept]. Additionally,
+  @racket[listen-evt] itself must be suitable as an argument to
+  @racket[close].
 
   @history[#:added "1.3"]
 }
@@ -100,13 +103,13 @@ support for running general-purpose networked servers.
                      [#:max-concurrent max-concurrent
                       (or/c +inf.0 natural-number/c)
                       +inf.0]
-                     [#:make-timeout-evt make-timeout-evt
+                     [#:timeout-evt-proc make-timeout-evt
                       (-> thread? input-port? output-port? boolean? evt?)
                       (λ (thd in out break-sent?) never-evt)]
-                     [#:accept accept
+                     [#:accept-proc accept
                       (-> @#,tech{listener} (values input-port? output-port?))
                       tcp-accept]
-                     [#:close close
+                     [#:close-proc close
                       (-> listen-evt any)
                       tcp-close]) (-> void?)]{
 
@@ -235,8 +238,8 @@ Sockets"] for details on the procedures used here.}
   (define path "/tmp/server.sock")
   (define stop
     (start-server
-     #:accept unix-socket-accept
-     #:close (λ (l) (delete-file (listener-path l)))
+     #:accept-proc unix-socket-accept
+     #:close-proc (λ (l) (delete-file (listener-path l)))
      (listener path (unix-socket-listen path 512))
      (make-tls-echo server-ctx)))
   (code:line)
@@ -263,8 +266,8 @@ process and does not rely on any networking machinery:
   (define ch (make-channel))
   (define stop
     (start-server
-     #:accept (λ (ports) (apply values ports))
-     #:close void
+     #:accept-proc (λ (ports) (apply values ports))
+     #:close-proc void
      ch
      echo))
   (code:line)
