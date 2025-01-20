@@ -111,6 +111,58 @@
 ((close-output-port out) ((3) 0 () 0 () () (c values c (void))) #"" #"")
 ((close-input-port in) ((3) 0 () 0 () () (c values c (void))) #"" #"")
 ((stop) ((3) 0 () 0 () () (c values c (void))) #"" #"")
+((define (slow-handler in out)
+   (with-handlers
+    ((exn:break?
+      (λ (e)
+        (displayln "slow-handler: Ignoring break")
+        (slow-handler in out))))
+    (displayln "slow-handler: Blocking forever")
+    (sync never-evt)))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((define (make-noisy-timeout-evt thd in out break-sent?)
+   (printf "make-noisy-timeout-evt: Called with ~v\n" break-sent?)
+   (cond
+    ((not break-sent?)
+     (wrap-evt
+      (alarm-evt (+ (current-inexact-milliseconds) 1000))
+      (λ (_) (displayln "make-noisy-timeout-evt: Break timeout"))))
+    (else
+     (define sema (make-semaphore))
+     (thread
+      (λ ()
+        (sleep 1)
+        (displayln "make-noisy-timeout-evt: Still waiting")
+        (sleep 1)
+        (semaphore-post sema)))
+     (wrap-evt
+      sema
+      (λ (_) (displayln "make-noisy-timeout-evt: Kill timeout"))))))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((define stop
+   (start-server
+    (tcp-listen 9000 512 #t "127.0.0.1")
+    slow-handler
+    #:timeout-evt-proc
+    make-noisy-timeout-evt))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((define-values (in out) (tcp-connect "127.0.0.1" 9000))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((displayln (read-byte in))
+ ((3) 0 () 0 () () (c values c (void)))
+ #"make-noisy-timeout-evt: Called with #f\nslow-handler: Blocking forever\nmake-noisy-timeout-evt: Break timeout\nmake-noisy-timeout-evt: Called with #t\nslow-handler: Ignoring break\nslow-handler: Blocking forever\nmake-noisy-timeout-evt: Still waiting\nmake-noisy-timeout-evt: Kill timeout\n#<eof>\n"
+ #"")
+((close-output-port out) ((3) 0 () 0 () () (c values c (void))) #"" #"")
+((close-input-port in) ((3) 0 () 0 () () (c values c (void))) #"" #"")
+((stop) ((3) 0 () 0 () () (c values c (void))) #"" #"")
 ((define ch (make-channel)) ((3) 0 () 0 () () (c values c (void))) #"" #"")
 ((define stop
    (start-server

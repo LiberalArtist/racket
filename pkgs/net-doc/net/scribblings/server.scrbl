@@ -22,6 +22,7 @@ including automatic multi-threading and resource management.
 @(define example-tcp "example-tcp")
 @(define example-tcp+tls "example-tcp+tls")
 @(define example-unix-socket "example-unix-socket")
+@(define example-timeout "example-timeout")
 @(define example-pipe "example-pipe")
 
 @defproc[(start-server [listen-evt (evt/c @#,tech{listener})]
@@ -80,6 +81,8 @@ including automatic multi-threading and resource management.
   ready for synchronization, the connection's custodian will be shut down
   and, consequently, the handling thread will be killed if it is still
   running. The default @racket[make-timeout-evt] does not impose a timeout.
+  @seclink[example-timeout]{The examples} demonstrate the use of
+  @racket[make-timeout-evt].
 
   The @racket[listen-evt], @racket[accept] and @racket[close]
   arguments together determine the protocol that is used. The
@@ -260,6 +263,55 @@ Sockets"] for details on the procedures used here.}
   (displayln "hello" out)
   (flush-output out)
   (read-line in)
+  (close-output-port out)
+  (close-input-port in)
+  (stop)
+]
+
+@subsection[#:tag example-timeout]{Server with Connection Timeout}
+
+This example shows how to enforce a per-connection timeout.
+
+@examples[
+  #:label #f
+  #:eval ev
+  (define (slow-handler in out)
+    (with-handlers ([exn:break?
+                     (λ (e)
+                       (displayln "slow-handler: Ignoring break")
+                       (slow-handler in out))])
+      (displayln "slow-handler: Blocking forever")
+      (sync never-evt)))
+  (code:line)
+
+  (define (make-noisy-timeout-evt thd in out break-sent?)
+    (printf "make-noisy-timeout-evt: Called with ~v\n" break-sent?)
+    (cond
+      [(not break-sent?)
+       (wrap-evt (alarm-evt (+ (current-inexact-milliseconds) 1000))
+                 (λ (_)
+                   (displayln "make-noisy-timeout-evt: Break timeout")))]
+      [else
+       (define sema (make-semaphore))
+       (thread (λ ()
+                 (sleep 1)
+                 (displayln "make-noisy-timeout-evt: Still waiting")
+                 (sleep 1)
+                 (semaphore-post sema)))
+       (wrap-evt sema
+                 (λ (_)
+                   (displayln "make-noisy-timeout-evt: Kill timeout")))]))
+  (code:line)
+
+  (define stop
+    (start-server (tcp-listen 9000 512 #t "127.0.0.1")
+                  slow-handler
+                  #:timeout-evt-proc make-noisy-timeout-evt))
+  (code:line)
+
+  (define-values (in out)
+    (tcp-connect "127.0.0.1" 9000))
+  (displayln (read-byte in)) ; https://github.com/racket/racket/issues/5185
   (close-output-port out)
   (close-input-port in)
   (stop)
