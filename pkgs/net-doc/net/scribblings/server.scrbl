@@ -22,7 +22,7 @@ including automatic multi-threading and resource management.
 @(define example-tcp "example-tcp")
 @(define example-tcp+tls "example-tcp+tls")
 @(define example-unix-socket "example-unix-socket")
-@(define example-ports "example-ports")
+@(define example-pipe "example-pipe")
 
 @defproc[(start-server [listen-evt (evt/c @#,tech{listener})]
                        [handle (-> input-port? output-port? any)]
@@ -89,7 +89,7 @@ including automatic multi-threading and resource management.
   as created by @racket[tcp-listen]. The examples illustrate using
   these arguments to serve instead over
   @seclink[example-unix-socket]{Unix domain sockets}
-  or over @seclink[example-ports]{plain Racket ports}.
+  or over @seclink[example-pipe]{plain Racket pipes}.
   In the general case, @racket[listen-evt] must be a
   @tech[#:doc reference]{synchronizable event} that is @tech[#:doc
   reference]{ready for synchronization} when @racket[accept] would not
@@ -265,7 +265,7 @@ Sockets"] for details on the procedures used here.}
   (stop)
 ]
 
-@subsection[#:tag example-ports]{Echo Server over Ports}
+@subsection[#:tag example-pipe]{Echo Server over Racket Pipes}
 
 Finally, here is an echo server that operates entirely within a Racket
 process and does not rely on any networking machinery.
