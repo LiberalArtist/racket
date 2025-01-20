@@ -15,11 +15,14 @@
 @defmodule[net/server]
 
 The @racketmodname[net/server] library provides
-support for running general-purpose networked servers.
+support for running general-purpose networked servers,
+including automatic multi-threading and resource management.
 
 @(define reference '(lib "scribblings/reference/reference.scrbl"))
-@(define unix-sockets-link @seclink["Echo_Server_over_Unix_Domain_Sockets"]{Unix domain sockets})
-@(define ports-link @seclink["Echo_Server_over_Ports"]{plain Racket ports})
+@(define example-tcp "example-tcp")
+@(define example-tcp+tls "example-tcp+tls")
+@(define example-unix-socket "example-unix-socket")
+@(define example-ports "example-ports")
 
 @defproc[(start-server [listen-evt (evt/c @#,tech{listener})]
                        [handle (-> input-port? output-port? any)]
@@ -60,6 +63,12 @@ support for running general-purpose networked servers.
   @racket[current-custodian] is parameterized to the connection's
   custodian.
 
+  The server keeps track of the number of active connections
+  and pauses accepting new connections once that number reaches
+  @racket[max-concurrent], resuming once the number goes down again. By
+  default, @racket[max-concurrent] is @racket[+inf.0], which does not
+  impose a limit on the number of active connections.
+
   For each connection, @racket[make-timeout-evt] is called with the
   connection-handling thread, the input port and the output port of
   the connection, and a boolean to signal if the handling thread has
@@ -67,17 +76,10 @@ support for running general-purpose networked servers.
   the event it returns is ready for synchronization, if the handling
   thread is still running, the handling thread is sent a break and
   @racket[make-timeout-evt] is called again (this time with @racket[#t]
-  for the last argument) to produce an event that, when ready for
-  synchronization, will cause the connection's custodian to be shut down
-  and, consequently, the handling thread to be killed if it is still
-  running by that time. The default @racket[make-timeout-evt] does not
-  impose a timeout.
-
-  The server keeps track of the number of active connections
-  and pauses accepting new connections once that number reaches
-  @racket[max-concurrent], resuming once the number goes down again. By
-  default, @racket[max-concurrent] is @racket[+inf.0], which does not
-  impose a limit on the number of active connections.
+  for the last argument) to produce another event. When this event is
+  ready for synchronization, the connection's custodian will be shut down
+  and, consequently, the handling thread will be killed if it is still
+  running. The default @racket[make-timeout-evt] does not impose a timeout.
 
   The @racket[listen-evt], @racket[accept] and @racket[close]
   arguments together determine the protocol that is used. The
@@ -85,15 +87,21 @@ support for running general-purpose networked servers.
   default @racket[accept] and @racket[close] procedures expect
   @racket[listen-evt] to be a @tech[#:doc reference]{TCP listener}
   as created by @racket[tcp-listen]. The examples illustrate using
-  these arguments to serve instead over @unix-sockets-link or over
-  @|ports-link|. In the general case, @racket[listen-evt] must be a
+  these arguments to serve instead over
+  @seclink[example-unix-socket]{Unix domain sockets}
+  or over @seclink[example-ports]{plain Racket ports}.
+  In the general case, @racket[listen-evt] must be a
   @tech[#:doc reference]{synchronizable event} that is @tech[#:doc
   reference]{ready for synchronization} when @racket[accept] would not
   block, and its @tech[#:doc reference]{synchronization result} must be
   some kind of @deftech{listener} value (perhaps @racket[listen-evt]
   itself) that can be passed to @racket[accept]. Additionally,
   @racket[listen-evt] itself must be suitable as an argument to
-  @racket[close].
+  @racket[close]. Beware that new connections are not accepted while
+  the call to @racket[accept] is in progress, so @racket[accept]
+  is not a good place to perform expensive work, such as starting a
+  TLS session: see @seclink[example-tcp+tls]{the examples} for
+  a better approach.
 
   @history[#:added "1.3"]
 }
@@ -129,7 +137,7 @@ support for running general-purpose networked servers.
 @(define ev (make-log-based-eval server-log.rktd (if (getenv "RECORD_NET_SERVER_EVAL") 'record 'replay)))
 @(ev '(require net/server racket/tcp))
 
-@subsection{TCP Echo Server}
+@subsection[#:tag example-tcp]{TCP Echo Server}
 
 Here is an implementation of a TCP echo server using
 @racket[start-server]:
@@ -165,7 +173,7 @@ Here is an implementation of a TCP echo server using
   (stop)
 ]
 
-@subsection{TCP Echo Server with TLS Support}
+@subsection[#:tag example-tcp+tls]{TCP Echo Server with TLS Support}
 
 Here is how you might wrap the previous echo server implementation to
 add TLS support:
@@ -204,6 +212,7 @@ add TLS support:
 
   (code:line)
   (define-values (in out)
+    (code:comment "using insecure client context for brevity")
     (ssl-connect "127.0.0.1" 9000))
   (displayln "hello" out)
   (flush-output out)
@@ -213,7 +222,7 @@ add TLS support:
   (stop)
 ]
 
-@subsection{Echo Server over Unix Domain Sockets}
+@subsection[#:tag example-unix-socket]{Echo Server over Unix Domain Sockets}
 
 This example builds upon the previous one to run an echo server with TLS over
 @tech[#:indirect? #t #:doc '(lib "scribblings/socket/unix-socket.scrbl")]{Unix domain sockets}.
@@ -246,6 +255,7 @@ Sockets"] for details on the procedures used here.}
 
   (define-values (in out)
     (let-values ([(in out) (unix-socket-connect path)])
+      (code:comment "using insecure client context for brevity")
       (ports->ssl-ports in out)))
   (displayln "hello" out)
   (flush-output out)
@@ -255,10 +265,13 @@ Sockets"] for details on the procedures used here.}
   (stop)
 ]
 
-@subsection{Echo Server over Ports}
+@subsection[#:tag example-ports]{Echo Server over Ports}
 
 Finally, here is an echo server that operates entirely within a Racket
-process and does not rely on any networking machinery:
+process and does not rely on any networking machinery.
+This may be useful for testing purposes.
+Note that, since @racket[make-pipe] is called outside of any connection's
+custodian, these ports are @emph{not} cleaned up as usual.
 
 @examples[
   #:label #f
